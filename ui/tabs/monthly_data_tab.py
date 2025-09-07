@@ -1,45 +1,115 @@
 """
-Monthly Data Tab
-Tab for managing monthly expense data with year/month dropdowns and table.
+Monthly Data Tab (Refactored)
+Tab for managing monthly expense data using the BaseEditableTable component.
 """
 
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
-    QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox, QPushButton, QMessageBox
-)
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont, QColor
+import pandas as pd
 from datetime import datetime
 import calendar
-import pandas as pd
+from typing import List, Dict, Any
+from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QGroupBox, QPushButton, QTableWidget, QHeaderView
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
 
-from services.google_sheets import GoogleSheetsService
+from services.cached_sheets_service import CachedGoogleSheetsService
+from ui.components import BaseEditableTable, ColumnConfig
 
 
-class MonthlyDataTab(QWidget):
-    """Monthly data tab with year/month dropdowns and table."""
+class MonthlyDataTab(BaseEditableTable):
+    """Monthly expense data management tab using BaseEditableTable."""
     
-    def __init__(self, sheets_service: GoogleSheetsService, spreadsheet_id: str):
-        super().__init__()
-        self.sheets_service = sheets_service
-        self.spreadsheet_id = spreadsheet_id
+    def __init__(self, sheets_service: CachedGoogleSheetsService, spreadsheet_id: str):
+        """Initialize monthly data tab.
+        
+        Args:
+            sheets_service: Cached sheets service.
+            spreadsheet_id: Google Sheets spreadsheet ID.
+        """
+        # Store for later initialization
+        self.cached_sheets_service = sheets_service
+        self.cached_spreadsheet_id = spreadsheet_id
         self.current_sheet_name = ""
-        self.pending_changes_rows = set()  # Track rows with pending changes
-        self.changed_cells = set()  # Track individual cells that have changed (row, col)
-        self.original_values = {}  # Store original values for changed cells (row, col): value
-        self.payment_methods = []  # Cache for payment methods
-        self._updating_highlights = False  # Flag to prevent recursion during highlighting
-        self.server_row_count = 0  # Track how many DATA rows came from server (excludes headers, for new row detection)
-        self.setup_ui()
+        
+        # Define expense column configuration
+        columns_config = [
+            ColumnConfig(
+                header="Date",
+                component_type="text",
+                required=True,
+                tooltip="Date of expense (YYYY-MM-DD format)",
+                validation=self.validate_date,
+                default_value=datetime.now().strftime("%Y-%m-%d"),
+                resize_mode="content"
+            ),
+            ColumnConfig(
+                header="Description", 
+                component_type="text",
+                required=True,
+                tooltip="Description of the expense",
+                validation=lambda x: len(x.strip()) > 0,
+                resize_mode="stretch"
+            ),
+            ColumnConfig(
+                header="Amount",
+                component_type="number",
+                required=True,
+                tooltip="Amount spent",
+                validation=self.validate_amount,
+                default_value="0.00",
+                resize_mode="content"
+            ),
+            ColumnConfig(
+                header="Category",
+                component_type="dropdown",
+                options_source="get_categories",
+                tooltip="Category of expense",
+                component_config={"editable": True},
+                resize_mode="content"
+            ),
+            ColumnConfig(
+                header="Payment Method",
+                component_type="dropdown",
+                options_source="get_payment_methods",
+                tooltip="Payment method used",
+                component_config={"editable": True},
+                resize_mode="content"
+            ),
+            ColumnConfig(
+                header="Notes",
+                component_type="text",
+                tooltip="Additional notes (optional)",
+                default_value="",
+                resize_mode="stretch"
+            )
+        ]
+        
+        # We'll initialize the base class after setting up month/year controls
+        self.setup_month_year_controls()
+        
+        # Initialize base table (will be updated when month/year changes)
+        super().__init__(
+            columns_config=columns_config,
+            sheets_service=sheets_service,
+            spreadsheet_id=spreadsheet_id,
+            sheet_name="",  # Will be set dynamically
+            title="📅 Monthly Expense Data",
+            add_button_text="➕ Add New Expense"
+        )
+        
+        # Set default values
         self.setup_default_values()
     
+    def setup_month_year_controls(self):
+        """Setup month and year selection controls."""
+        # We need to override the base UI setup to add month/year controls
+        self._month_year_setup_needed = True
+    
     def setup_ui(self):
-        """Setup the monthly data tab UI."""
-        layout = QVBoxLayout()
-        self.setLayout(layout)
+        """Setup the user interface with month/year controls."""
+        layout = QVBoxLayout(self)
         
         # Title
-        title = QLabel("📅 Monthly Data")
+        title = QLabel(self.title)
         title_font = QFont()
         title_font.setPointSize(16)
         title_font.setBold(True)
@@ -47,7 +117,7 @@ class MonthlyDataTab(QWidget):
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
         
-        # Controls section
+        # Month/Year Selection
         controls_group = QGroupBox("Select Month")
         controls_layout = QHBoxLayout()
         controls_group.setLayout(controls_layout)
@@ -72,22 +142,22 @@ class MonthlyDataTab(QWidget):
         self.month_combo.currentTextChanged.connect(self.on_date_changed)
         controls_layout.addWidget(self.month_combo)
         
-        # Status label
-        self.sheet_status_label = QLabel("Ready")
-        self.sheet_status_label.setStyleSheet("color: #666; font-style: italic;")
-        controls_layout.addWidget(self.sheet_status_label)
-        
-        # Add stretch
         controls_layout.addStretch()
-        
         layout.addWidget(controls_group)
         
-        # Table controls
-        table_controls_layout = QHBoxLayout()
+        # Now add the rest of the standard UI components manually
+        # (we can't call super().setup_ui() because it would duplicate the layout)
         
-        self.add_row_button = QPushButton("➕ Add New Expense")
-        self.add_row_button.clicked.connect(self.add_new_expense_row)
-        self.add_row_button.setStyleSheet("""
+        # Controls section
+        controls_group2 = QGroupBox("Actions")
+        controls_layout2 = QHBoxLayout()
+        controls_group2.setLayout(controls_layout2)
+        layout.addWidget(controls_group2)
+        
+        # Add button
+        self.add_button = QPushButton(self.add_button_text)
+        self.add_button.clicked.connect(self.add_new_row)
+        self.add_button.setStyleSheet("""
             QPushButton {
                 background-color: #28a745;
                 color: white;
@@ -98,14 +168,17 @@ class MonthlyDataTab(QWidget):
             }
             QPushButton:hover { background-color: #218838; }
         """)
-        table_controls_layout.addWidget(self.add_row_button)
+        controls_layout2.addWidget(self.add_button)
         
+        # Refresh button
         self.refresh_button = QPushButton("🔄 Refresh Data")
-        self.refresh_button.clicked.connect(self.refresh_current_sheet)
-        table_controls_layout.addWidget(self.refresh_button)
+        self.refresh_button.clicked.connect(self.refresh_data)
+        controls_layout2.addWidget(self.refresh_button)
         
+        # Confirm button (initially hidden)
         self.confirm_button = QPushButton("✅ Confirm Changes")
         self.confirm_button.clicked.connect(self.confirm_pending_changes)
+        self.confirm_button.setVisible(False)
         self.confirm_button.setStyleSheet("""
             QPushButton {
                 background-color: #007bff;
@@ -116,16 +189,13 @@ class MonthlyDataTab(QWidget):
                 font-weight: bold;
             }
             QPushButton:hover { background-color: #0056b3; }
-            QPushButton:disabled {
-                background-color: #cccccc;
-                color: #666666;
-            }
         """)
-        self.confirm_button.setVisible(False)  # Hidden by default
-        table_controls_layout.addWidget(self.confirm_button)
+        controls_layout2.addWidget(self.confirm_button)
         
+        # Delete button (initially hidden)
         self.delete_button = QPushButton("🗑️ Delete Selected")
-        self.delete_button.clicked.connect(self.delete_selected_expenses)
+        self.delete_button.clicked.connect(self.delete_selected_rows)
+        self.delete_button.setVisible(False)
         self.delete_button.setStyleSheet("""
             QPushButton {
                 background-color: #dc3545;
@@ -136,895 +206,299 @@ class MonthlyDataTab(QWidget):
                 font-weight: bold;
             }
             QPushButton:hover { background-color: #c82333; }
-            QPushButton:disabled {
-                background-color: #cccccc;
-                color: #666666;
-            }
         """)
-        self.delete_button.setVisible(False)  # Hidden by default
-        table_controls_layout.addWidget(self.delete_button)
+        controls_layout2.addWidget(self.delete_button)
         
-        table_controls_layout.addStretch()
-        layout.addLayout(table_controls_layout)
+        controls_layout2.addStretch()
         
-        # Table
+        # Status label
+        self.status_label = QLabel("Ready")
+        self.status_label.setStyleSheet("color: #666; font-style: italic;")
+        layout.addWidget(self.status_label)
+        
+        # Create table
         self.data_table = QTableWidget()
-        self.data_table.setAlternatingRowColors(False)  # Disabled to allow custom highlighting
-        self.data_table.setSortingEnabled(False)  # Disable sorting to maintain data integrity
+        self.data_table.setAlternatingRowColors(False)  
+        self.data_table.setSortingEnabled(False)  
         self.data_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         
-        # Connect to signals for real-time updates
-        self.data_table.itemChanged.connect(self.on_table_item_changed)
-        
-        # Connect to selection changed signal for delete button visibility
-        self.data_table.selectionModel().selectionChanged.connect(self.on_selection_changed)
-        
         layout.addWidget(self.data_table)
-        
-        # Initialize with placeholder
-        self.show_placeholder_table()
     
     def setup_default_values(self):
-        """Setup default month/year and check for existing sheet."""
+        """Setup default year and month values."""
+        current_year = datetime.now().year
+        current_month = datetime.now().month
+        
+        self.year_combo.setCurrentText(str(current_year))
+        self.month_combo.setCurrentText(calendar.month_name[current_month])
+        
+        # Load data for current month
         self.on_date_changed()
     
-    def show_placeholder_table(self):
-        """Show placeholder content in the table."""
-        self.data_table.setRowCount(3)
-        self.data_table.setColumnCount(4)
-        self.data_table.setHorizontalHeaderLabels(["Date", "Description", "Amount", "Category"])
-        
-        # Add placeholder rows
-        placeholder_data = [
-            ["Select month", "to load data", "from Google", "Sheets"],
-            ["", "", "", ""],
-            ["🔄", "Choose year and month", "above to get started", "📊"]
-        ]
-        
-        for row, row_data in enumerate(placeholder_data):
-            for col, value in enumerate(row_data):
-                item = QTableWidgetItem(str(value))
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                if row == 0:
-                    item.setBackground(QColor(220, 220, 220))  # Light gray color
-                self.data_table.setItem(row, col, item)
-        
-        # Auto-resize columns
-        header = self.data_table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-    
-    def get_sheet_name(self) -> str:
-        """Get the sheet name based on current month/year selection."""
-        month = self.month_combo.currentText()
-        year = self.year_combo.currentText()
-        return f"{month} {year}"
-    
     def on_date_changed(self):
-        """Handle year/month dropdown changes."""
-        sheet_name = self.get_sheet_name()
-        self.current_sheet_name = sheet_name
-        
-        self.sheet_status_label.setText(f"📋 Current sheet: {sheet_name}")
-        
-        # Check if sheet exists
-        self.check_and_create_sheet(sheet_name)
-    
-    def check_and_create_sheet(self, sheet_name: str):
-        """Check if sheet exists, create if it doesn't."""
+        """Handle year/month selection changes."""
         try:
-            # Get list of existing sheets
+            year = self.year_combo.currentText()
+            month = self.month_combo.currentText()
+            
+            if not year or not month:
+                return
+            
+            # Generate sheet name
+            sheet_name = f"{month} {year}"
+            self.current_sheet_name = sheet_name
+            self.sheet_name = sheet_name  # Update base class property
+            
+            self.status_label.setText(f"🔄 Loading data for {sheet_name}...")
+            
+            # Check if sheet exists
             existing_sheets = self.sheets_service.get_sheet_names(self.spreadsheet_id)
             
             if sheet_name in existing_sheets:
-                self.sheet_status_label.setText(f"✅ Sheet '{sheet_name}' found")
-                self.load_sheet_data(sheet_name)
+                self.load_data()
             else:
-                self.sheet_status_label.setText(f"🔄 Creating new sheet '{sheet_name}'...")
+                self.status_label.setText(f"🔄 Creating new sheet '{sheet_name}'...")
                 self.create_new_sheet(sheet_name)
                 
         except Exception as e:
-            self.sheet_status_label.setText(f"❌ Error: {str(e)}")
-            self.show_placeholder_table()
+            self.status_label.setText(f"❌ Error changing date: {e}")
     
     def create_new_sheet(self, sheet_name: str):
-        """Create a new expense sheet with default headers."""
+        """Create a new expense sheet for the selected month."""
         try:
-            # Create the new sheet with default expense headers
             success = self.sheets_service.create_expense_sheet(
                 self.spreadsheet_id, sheet_name
             )
             
             if success:
-                self.sheet_status_label.setText(f"✅ Created new sheet '{sheet_name}'")
-                # Load the newly created sheet (will show headers only)
-                self.load_sheet_data(sheet_name)
+                self.status_label.setText(f"✅ Created new sheet '{sheet_name}'")
+                # Load the newly created sheet
+                self.load_data()
             else:
-                self.sheet_status_label.setText(f"❌ Failed to create sheet '{sheet_name}'")
-                self.show_empty_table_for_new_sheet()
+                self.status_label.setText(f"❌ Failed to create sheet '{sheet_name}'")
+                self.show_empty_table()
                 
         except Exception as e:
-            self.sheet_status_label.setText(f"❌ Error creating sheet: {str(e)}")
-            self.show_empty_table_for_new_sheet()
+            self.status_label.setText(f"❌ Error creating sheet: {e}")
+            self.show_empty_table()
     
-    def load_sheet_data(self, sheet_name: str):
-        """Load data from the specified sheet."""
+    def show_empty_table(self):
+        """Show empty table for new or failed sheets."""
+        self.data_table.setRowCount(0)
+        self.server_row_count = 0
+        self.pending_changes_rows.clear()
+        self.changed_cells.clear()
+        self.original_values.clear()
+        self.update_confirm_button_visibility()
+    
+    def load_data(self):
+        """Load expense data for the current sheet."""
+        if not self.current_sheet_name:
+            return
+            
         try:
-            # Try to load data from the sheet
-            range_name = f"'{sheet_name}'!A:Z"  # Use quotes for sheet names with spaces
+            self.status_label.setText("📂 Loading expense data...")
+            
+            # Get data using cached service
+            range_name = f"'{self.current_sheet_name}'!A:Z"
             df = self.sheets_service.get_data_as_dataframe(
-                self.spreadsheet_id, range_name
+                self.spreadsheet_id, range_name, use_cache=True
             )
             
             if df.empty:
-                self.show_empty_table_for_new_sheet()
-                self.sheet_status_label.setText(f"📄 Sheet '{sheet_name}' is empty")
+                self.show_empty_table()
+                self.status_label.setText(f"📝 No expenses found for {self.current_sheet_name}")
                 return
             
-            # Populate table with data
+            # Populate table
             self.populate_table_with_data(df)
             
-            # Show cache status along with row count
-            cache_indicator = self._get_cache_status_indicator(sheet_name)
-            self.sheet_status_label.setText(f"✅ Loaded {len(df)} rows from '{sheet_name}' {cache_indicator}")
+            # Show cache status
+            cache_indicator = self._get_cache_status_indicator()
+            self.status_label.setText(
+                f"✅ Loaded {len(df)} expenses for {self.current_sheet_name} {cache_indicator}"
+            )
             
         except Exception as e:
-            self.sheet_status_label.setText(f"❌ Error loading sheet: {str(e)}")
-            self.show_empty_table_for_new_sheet()
+            self.status_label.setText(f"❌ Error loading data: {e}")
+            self.show_empty_table()
     
-    def populate_table_with_data(self, df):
-        """Populate the table with DataFrame data."""
-        # Load payment methods first
-        self.load_payment_methods()
-        
-        # Temporarily disconnect the signal to avoid triggering updates during population
+    def populate_table_with_data(self, df: pd.DataFrame):
+        """Populate table with expense data."""
+        # Temporarily disconnect signals
         self.data_table.itemChanged.disconnect()
         
-        # Update server row count - this is how many DATA rows exist on the server
-        # (headers are excluded since get_data_as_dataframe uses has_header=True by default)
+        # Update server row count
         self.server_row_count = len(df)
         
+        # Set table size  
         self.data_table.setRowCount(len(df))
-        self.data_table.setColumnCount(len(df.columns))
-        self.data_table.setHorizontalHeaderLabels(list(df.columns))
         
+        # Load dropdown options
+        categories = self.get_categories()
+        payment_methods = self.get_payment_methods()
+        
+        # Populate rows
         for row in range(len(df)):
-            for col in range(len(df.columns)):
-                value = str(df.iloc[row, col]) if df.iloc[row, col] is not None else ""
+            for col in range(min(len(df.columns), len(self.columns_config))):
+                value = str(df.iloc[row, col]) if pd.notna(df.iloc[row, col]) else ""
                 
-                # Special handling for Payment Method column (column 4)
-                if col == 4:  # Payment Method column
-                    payment_combo = QComboBox()
-                    payment_combo.addItems(self.payment_methods)
-                    payment_combo.setEditable(True)  # Allow custom entries
-                    payment_combo.setCurrentText(value)
-                    payment_combo.currentTextChanged.connect(
-                        lambda text, r=row: self.on_payment_method_changed(r, text)
-                    )
-                    self.data_table.setCellWidget(row, col, payment_combo)
-                else:
-                    # Regular text item for other columns
-                    item = QTableWidgetItem(value)
-                    # Make cells editable with helpful tooltips
-                    item.setToolTip(f"Click to edit {list(df.columns)[col].lower()}")
-                    self.data_table.setItem(row, col, item)
+                # Create component
+                component = self.create_cell_component(row, col, value)
+                
+                # Special handling for dropdown columns
+                if col == 3 and hasattr(component, 'addItems'):  # Category column
+                    # Clear and repopulate options
+                    component.clear()
+                    component.addItems(categories)
+                    component.setCurrentText(value)
+                elif col == 4 and hasattr(component, 'addItems'):  # Payment method column
+                    # Clear and repopulate options
+                    component.clear()
+                    component.addItems(payment_methods)
+                    component.setCurrentText(value)
+                
+                # Set component in table
+                if hasattr(component, 'currentText'):  # It's a widget
+                    self.data_table.setCellWidget(row, col, component)
+                else:  # It's a table item
+                    self.data_table.setItem(row, col, component)
         
-        # Clear pending changes (these are from server data)
-        self.pending_changes_rows.clear()
+        # Column widths are now configured by BaseEditableTable based on ColumnConfig resize_mode
         
-        # Clear cell highlighting and store original values
-        self.clear_cell_highlighting()
+        # Store original values and clear changes
         self.store_original_values()
-        
-        # Update confirm button visibility
-        self.update_confirm_button_visibility()
-        
-        # Reconnect the signal
-        self.data_table.itemChanged.connect(self.on_table_item_changed)
-        
-        # Configure column resize behavior - expand from left to right
-        header = self.data_table.horizontalHeader()
-        # Set different resize modes for each column to expand left to right
-        if self.data_table.columnCount() >= 6:
-            header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # Date - fit content
-            header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)          # Description - expand
-            header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents) # Amount - fit content
-            header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)          # Category - expand
-            header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents) # Payment Method - fit content
-            header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)          # Notes - expand
-    
-    def show_empty_table_for_new_sheet(self):
-        """Show an empty table template for a new sheet."""
-        # Load payment methods first
-        self.load_payment_methods()
-        
-        # Temporarily disconnect the signal
-        self.data_table.itemChanged.disconnect()
-        
-        # New sheet has 0 rows from server
-        self.server_row_count = 0
-        
-        # Set up typical expense tracking columns (matching the service default headers)
-        self.data_table.setRowCount(0)  # Start with no rows - user can add them
-        self.data_table.setColumnCount(6)
-        self.data_table.setHorizontalHeaderLabels([
-            "Date", "Description", "Amount", "Category", "Payment Method", "Notes"
-        ])
-        
-        # Clear pending changes
         self.pending_changes_rows.clear()
-        
-        # Clear cell highlighting and original values
-        self.clear_cell_highlighting()
-        self.original_values.clear()
-        
-        # Update confirm button visibility
+        self.changed_cells.clear()
+        self.clear_all_highlighting()
         self.update_confirm_button_visibility()
         
-        # Reconnect the signal
+        # Reconnect signals
         self.data_table.itemChanged.connect(self.on_table_item_changed)
-        
-        # Configure column resize behavior - expand from left to right
-        header = self.data_table.horizontalHeader()
-        # Set different resize modes for each column to expand left to right
-        if self.data_table.columnCount() >= 6:
-            header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # Date - fit content
-            header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)          # Description - expand
-            header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents) # Amount - fit content
-            header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)          # Category - expand
-            header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents) # Payment Method - fit content
-            header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)          # Notes - expand
     
-    def load_payment_methods(self):
-        """Load payment methods from Google Sheets for dropdown."""
-        try:
-            self.payment_methods = self.sheets_service.get_payment_methods(self.spreadsheet_id)
-            if not self.payment_methods:
-                # If no payment methods found, provide defaults
-                self.payment_methods = ["Cash", "Credit Card", "Debit Card", "Bank Transfer"]
-        except Exception as e:
-            print(f"Error loading payment methods: {e}")
-            # Fallback to defaults
-            self.payment_methods = ["Cash", "Credit Card", "Debit Card", "Bank Transfer"]
-    
-    def update_confirm_button_visibility(self):
-        """Show/hide confirm button based on pending changes."""
-        if self.pending_changes_rows:
-            self.confirm_button.setVisible(True)
-            count = len(self.pending_changes_rows)
-            row_text = "row" if count == 1 else "rows"
-            self.confirm_button.setText(f"✅ Confirm Changes ({count} {row_text})")
-            self.sheet_status_label.setText(f"⏳ {count} {row_text} with pending changes. Click Confirm to save.")
-        else:
-            self.confirm_button.setVisible(False)
-            # Only set to "Ready" if status isn't showing a recent success/error message
-            if (hasattr(self, 'current_sheet_name') and self.current_sheet_name and 
-                not self.sheet_status_label.text().startswith("✅") and 
-                not self.sheet_status_label.text().startswith("⚠️")):
-                self.sheet_status_label.setText("Ready")
-    
-    def store_original_values(self):
-        """Store original values for change tracking."""
-        self.original_values.clear()
-        for row in range(self.data_table.rowCount()):
-            for col in range(self.data_table.columnCount()):
-                if col == 4:  # Payment Method column - get from dropdown
-                    widget = self.data_table.cellWidget(row, col)
-                    if isinstance(widget, QComboBox):
-                        value = widget.currentText()
-                    else:
-                        value = ""
-                else:
-                    # Regular text item
-                    item = self.data_table.item(row, col)
-                    value = item.text() if item else ""
-                
-                self.original_values[(row, col)] = value
-    
-    def highlight_changed_cell(self, row: int, col: int):
-        """Apply eye-friendly highlighting to a changed cell."""
-        # Prevent recursion during highlight updates
-        self._updating_highlights = True
-        try:
-            if col == 4:  # Payment Method column - dropdown widget
-                widget = self.data_table.cellWidget(row, col)
-                if isinstance(widget, QComboBox):
-                    # Apply yellow background color to dropdown to match other cells
-                    widget.setStyleSheet("""
-                        QComboBox {
-                            background-color: #ffeb82;
-                            border: 1px solid #ffeaa7;
-                            border-radius: 3px;
-                            padding: 2px;
-                        }
-                        QComboBox:hover {
-                            background-color: #ffe066;
-                        }
-                        QComboBox:drop-down {
-                            background-color: #ffeb82;
-                        }
-                    """)
-            else:
-                # Regular text item
-                item = self.data_table.item(row, col)
-                if item:
-                    print(f"Setting background color for item {item.text()} in row {row} and column {col}")
-                    # Try multiple approaches to ensure background sticks
-                    yellow_color = QColor(255, 235, 130)  # More visible yellow
-                    
-                    # Method 1: Standard setBackground
-                    item.setBackground(yellow_color)
-                    
-                    # Method 2: Via data role
-                    item.setData(Qt.ItemDataRole.BackgroundRole, yellow_color)
-                    
-                    # Method 3: Force refresh the item
-                    self.data_table.update(self.data_table.indexFromItem(item))
-                    
-                    # Method 4: Set a custom property for identification
-                    item.setData(Qt.ItemDataRole.UserRole, "changed_cell")
-                    
-                    print(f"Background color set for item {item.text()} in row {row} and column {col}")
-                    print(f"Item background after setting: {item.background().color().name()}")
-        finally:
-            self._updating_highlights = False
-    
-    def clear_cell_highlighting(self):
-        """Clear highlighting from all cells."""
-        # Prevent recursion during highlight clearing
-        self._updating_highlights = True
-        try:
-            self.changed_cells.clear()
+    def validate_date(self, date_str: str) -> bool:
+        """Validate date string."""
+        if not date_str.strip():
+            return False
             
-            for row in range(self.data_table.rowCount()):
-                for col in range(self.data_table.columnCount()):
-                    if col == 4:  # Payment Method column - dropdown widget
-                        widget = self.data_table.cellWidget(row, col)
-                        if isinstance(widget, QComboBox):
-                            # Clear custom stylesheet
-                            widget.setStyleSheet("")
-                    else:
-                        # Regular text item
-                        item = self.data_table.item(row, col)
-                        if item:
-                            # Clear background color using both methods
-                            item.setBackground(QColor())
-                            item.setData(Qt.ItemDataRole.BackgroundRole, QColor())
-        finally:
-            self._updating_highlights = False
-    
-    def check_cell_changed(self, row: int, col: int) -> bool:
-        """Check if a cell's value has changed from its original value."""
-        original_value = self.original_values.get((row, col), "")
-        
-        if col == 4:  # Payment Method column - get from dropdown
-            widget = self.data_table.cellWidget(row, col)
-            current_value = widget.currentText() if isinstance(widget, QComboBox) else ""
-        else:
-            # Regular text item
-            item = self.data_table.item(row, col)
-            current_value = item.text() if item else ""
-        
-        return current_value != original_value
-    
-    def is_new_row(self, row: int) -> bool:
-        """Check if a row is a new row that hasn't been saved to the server yet.
-        
-        Args:
-            row: The row index to check (0-based, data rows only).
-            
-        Returns:
-            True if the row is new (added locally), False if it exists on the server.
-        """
-        # A row is "new" if its index is >= the number of data rows that came from the server
-        # Note: server_row_count excludes header rows since we use has_header=True
-        # Qt table rows are 0-indexed and contain only data (headers are separate)
-        return row >= self.server_row_count
-    
-    def on_table_item_changed(self, item):
-        """Handle table item changes and track for confirmation."""
-        if not self.current_sheet_name or self._updating_highlights:
-            return  # Skip if no sheet or we're updating highlights to prevent recursion
-        
-        row = item.row()
-        column = item.column()
-        new_value = item.text()
-        
-        # Skip Payment Method column (handled by dropdown)
-        if column == 4:  # Payment Method column
-            return
-        
-        # Basic validation for required fields
-        if column == 0 and not new_value.strip():  # Date column
-            self.sheet_status_label.setText("❌ Date cannot be empty")
-            return
-        
-        if column == 1 and not new_value.strip():  # Description column  
-            self.sheet_status_label.setText("❌ Description cannot be empty")
-            return
-        
-        # Check if cell value actually changed from original
-        if self.check_cell_changed(row, column):
-            # Track the changed cell
-            self.changed_cells.add((row, column))
-            # Apply highlighting to the changed cell
-            self.highlight_changed_cell(row, column)
-            # Mark this row as having pending changes
-            self.pending_changes_rows.add(row)
-        else:
-            # Cell was reverted to original value
-            self.changed_cells.discard((row, column))
-            # Clear highlighting (prevent recursion)
-            self._updating_highlights = True
+        try:
+            datetime.strptime(date_str.strip(), "%Y-%m-%d")
+            return True
+        except ValueError:
             try:
-                item.setBackground(QColor())  # Clear background for regular items
-                item.setData(Qt.ItemDataRole.BackgroundRole, QColor())  # Clear data role too
-            finally:
-                self._updating_highlights = False
-            # Check if row still has other changes
-            row_has_changes = any((row, col) in self.changed_cells for col in range(self.data_table.columnCount()))
-            if not row_has_changes:
-                self.pending_changes_rows.discard(row)
-        
-        # Update confirm button visibility
-        self.update_confirm_button_visibility()
+                datetime.strptime(date_str.strip(), "%m/%d/%Y")
+                return True
+            except ValueError:
+                self.status_label.setText("❌ Date must be in YYYY-MM-DD or MM/DD/YYYY format")
+                return False
     
-    def confirm_pending_changes(self):
-        """Confirm and save all pending changes to the server in a single batch operation."""
-        if not self.pending_changes_rows:
-            return
-        
-        self.sheet_status_label.setText("💾 Saving changes to Google Sheets...")
-        self.confirm_button.setEnabled(False)  # Disable during save
-        
+    def validate_amount(self, amount_str: str) -> bool:
+        """Validate amount string."""
+        if not amount_str.strip():
+            return False
+            
         try:
-            # Store count before clearing for reporting
-            changes_count = len(self.pending_changes_rows)
-            
-            # Batch all changes into a single update
-            success = self.save_all_pending_changes_batch()
-            
-            if success:
-                success_count = changes_count
-                error_count = 0
-            else:
-                success_count = 0
-                error_count = changes_count
-                
-        except Exception as e:
-            print(f"Error saving batch changes: {e}")
-            success_count = 0
-            error_count = len(self.pending_changes_rows)
-        
-        # Update UI based on results
-        self.confirm_button.setEnabled(True)
-        
-        if error_count == 0:
-            # Complete success - clear everything IMMEDIATELY
-            
-            # CRITICAL: Disconnect signals to prevent re-triggering during cleanup
-            self.data_table.itemChanged.disconnect()
-            
-            # Update server row count - all current DATA rows are now saved to server
-            # (Qt table rowCount() only counts data rows, headers are separate)
-            self.server_row_count = self.data_table.rowCount()
-            
-            # Clear all tracking data in one go
-            self.pending_changes_rows.clear()
-            self.changed_cells.clear()
-            
-            # Clear visual highlighting (prevent recursion)
-            self._updating_highlights = True
-            try:
-                for row in range(self.data_table.rowCount()):
-                    for col in range(self.data_table.columnCount()):
-                        if col == 4:  # Payment Method column - dropdown widget
-                            widget = self.data_table.cellWidget(row, col)
-                            if isinstance(widget, QComboBox):
-                                widget.setStyleSheet("")
-                        else:
-                            # Regular text item
-                            item = self.data_table.item(row, col)
-                            if item:
-                                item.setBackground(QColor())
-                                item.setData(Qt.ItemDataRole.BackgroundRole, QColor())
-            finally:
-                self._updating_highlights = False
-            
-            # Store new values as original values (refresh baseline) WITHOUT triggering signals
-            self.original_values.clear()
-            for row in range(self.data_table.rowCount()):
-                for col in range(self.data_table.columnCount()):
-                    if col == 4:  # Payment Method column - get from dropdown
-                        widget = self.data_table.cellWidget(row, col)
-                        if isinstance(widget, QComboBox):
-                            value = widget.currentText()
-                        else:
-                            value = ""
-                    else:
-                        # Regular text item
-                        item = self.data_table.item(row, col)
-                        value = item.text() if item else ""
-                    
-                    self.original_values[(row, col)] = value
-            
-            # CRITICAL: Reconnect signals AFTER all cleanup is done
-            self.data_table.itemChanged.connect(self.on_table_item_changed)
-            
-            # Update button visibility AFTER all cleanup is done
-            self.update_confirm_button_visibility()
-            
-            # Set success message
-            self.sheet_status_label.setText(f"✅ Successfully saved {success_count} changes")
-            QTimer.singleShot(3000, lambda: self.sheet_status_label.setText("Ready"))
-            
-            return  # Early return to avoid running cleanup logic again
-            
-        else:
-            self.sheet_status_label.setText(f"⚠️ Saved {success_count}, failed {error_count}. Try again for failed rows.")
-            
-            # For partial failures, only clear highlighting for successfully saved rows
-            # The pending_changes_rows and changed_cells for failed rows are preserved
-            successfully_saved_cells = set()
-            for row in range(self.data_table.rowCount()):
-                if row not in self.pending_changes_rows:  # Row was successfully saved
-                    for col in range(self.data_table.columnCount()):
-                        successfully_saved_cells.add((row, col))
-            
-            # Clear highlighting only for successfully saved cells (prevent recursion)
-            self._updating_highlights = True
-            try:
-                for row, col in successfully_saved_cells:
-                    if col == 4:  # Payment Method column - dropdown widget
-                        widget = self.data_table.cellWidget(row, col)
-                        if isinstance(widget, QComboBox):
-                            widget.setStyleSheet("")
-                    else:
-                        # Regular text item
-                        item = self.data_table.item(row, col)
-                        if item:
-                            # TODO: This is currently not working but it's not critical
-                            item.setBackground(QColor())
-                            item.setData(Qt.ItemDataRole.BackgroundRole, QColor())
-                    
-                    # Remove from changed_cells if it was there
-                    self.changed_cells.discard((row, col))
-            finally:
-                self._updating_highlights = False
-            
-            # Update original values for successfully saved rows
-            self.store_original_values()
-            
-            # Update confirm button visibility for partial failures
-            self.update_confirm_button_visibility()
+            amount = float(amount_str.strip())
+            return amount >= 0
+        except ValueError:
+            self.status_label.setText("❌ Amount must be a valid number")
+            return False
     
-    def save_all_pending_changes_batch(self) -> bool:
-        """Save all pending changes in a single batch operation."""
+    def validate_before_add(self) -> bool:
+        """Validate conditions before adding new expense."""
+        if not self.current_sheet_name:
+            self.status_label.setText("❌ Please select a month first")
+            return False
+            
+        return True
+    
+    def save_changes_to_server(self) -> bool:
+        """Save all pending changes to the server."""
         try:
-            # Get current server data to determine which rows are new
+            # Get current server data
             df = self.sheets_service.get_data_as_dataframe(
-                self.spreadsheet_id, f"'{self.current_sheet_name}'!A:Z"
+                self.spreadsheet_id, f"'{self.current_sheet_name}'!A:Z", use_cache=False
             )
-            # server_row_count = number of data rows on server (excluding header row)
-            server_row_count = len(df)
+            current_server_rows = len(df)
             
-            # Collect all changes into batch updates
+            # Collect batch updates
             batch_updates = []
             
-            for row in sorted(self.pending_changes_rows):
-                # Collect row data
+            for row in self.pending_changes_rows:
+                # Get complete row data
                 row_data = []
-                for col in range(self.data_table.columnCount()):
-                    if col == 4:  # Payment Method column - get from dropdown
-                        widget = self.data_table.cellWidget(row, col)
-                        if isinstance(widget, QComboBox):
-                            value = widget.currentText().strip()
-                        else:
-                            value = ""
-                    else:
-                        # Regular text item
-                        item = self.data_table.item(row, col)
-                        value = item.text().strip() if item else ""
-                    
+                for col in range(len(self.columns_config)):
+                    value = self.get_cell_value(row, col).strip()
                     row_data.append(value)
                 
-                # Validate required fields
-                if not row_data[0].strip() or not row_data[1].strip():  # Date and Description
-                    print(f"Skipping row {row}: missing required fields")
-                    continue
-                
-                # Determine target row in sheet
-                if row >= server_row_count:  # New row
-                    target_row = server_row_count + 2 + (row - server_row_count)  # +2 for header
-                else:  # Existing row
-                    target_row = row + 2  # +2 for header
+                if row < current_server_rows:
+                    # Update existing row
+                    sheet_row = row + 2
+                    range_str = f"A{sheet_row}:F{sheet_row}"
+                else:
+                    # Add new row
+                    next_row = current_server_rows + len([r for r in self.pending_changes_rows if r >= current_server_rows]) + 1  
+                    range_str = f"A{next_row}:F{next_row}"
                 
                 batch_updates.append({
-                    'range': f"A{target_row}:F{target_row}",  # Assuming 6 columns (A-F)
+                    'range': range_str,
                     'values': [row_data]
                 })
             
             if not batch_updates:
-                return False
+                return True
             
-            # Make single batch update
-            return self.sheets_service.batch_update_sheet_data(
-                self.spreadsheet_id,
-                self.current_sheet_name,
-                batch_updates
+            # Execute batch update
+            success = self.sheets_service.batch_update_sheet_data(
+                self.spreadsheet_id, self.current_sheet_name, batch_updates
             )
             
+            return success
+            
         except Exception as e:
-            print(f"Error in batch save: {e}")
+            print(f"Error saving expenses: {e}")
             return False
     
-    
-    def add_new_expense_row(self):
-        """Add a new expense row locally."""
-        if not self.current_sheet_name:
-            QMessageBox.warning(self, "No Sheet Selected", "Please select a month first.")
-            return
-        
+    def _get_cache_status_indicator(self) -> str:
+        """Get cache status indicator."""
         try:
-            # Load payment methods if not already loaded
-            if not self.payment_methods:
-                self.load_payment_methods()
-            
-            # Temporarily disconnect the signal
-            self.data_table.itemChanged.disconnect()
-            
-            # Get current date in YYYY-MM-DD format
-            current_date = datetime.now().strftime("%Y-%m-%d")
-            
-            # Add new row locally
-            new_row_index = self.data_table.rowCount()
-            self.data_table.insertRow(new_row_index)
-            
-            # Create and populate row items
-            # Date - auto-populated
-            date_item = QTableWidgetItem(current_date)
-            date_item.setToolTip("Date of expense")
-            self.data_table.setItem(new_row_index, 0, date_item)
-            
-            # Description - empty for user input
-            desc_item = QTableWidgetItem("")
-            desc_item.setToolTip("Enter expense description (required)")
-            self.data_table.setItem(new_row_index, 1, desc_item)
-            
-            # Amount - default to 0.00
-            amount_item = QTableWidgetItem("0.00")
-            amount_item.setToolTip("Enter amount")
-            self.data_table.setItem(new_row_index, 2, amount_item)
-            
-            # Category - empty for user input
-            category_item = QTableWidgetItem("")
-            category_item.setToolTip("Enter category")
-            self.data_table.setItem(new_row_index, 3, category_item)
-            
-            # Payment Method - create dropdown
-            payment_combo = QComboBox()
-            payment_combo.addItems(self.payment_methods)
-            payment_combo.setEditable(True)  # Allow custom entries
-            payment_combo.setCurrentText("")  # Start empty
-            payment_combo.currentTextChanged.connect(
-                lambda text, row=new_row_index: self.on_payment_method_changed(row, text)
-            )
-            self.data_table.setCellWidget(new_row_index, 4, payment_combo)
-            
-            # Notes - empty for user input
-            notes_item = QTableWidgetItem("")
-            notes_item.setToolTip("Enter notes (optional)")
-            self.data_table.setItem(new_row_index, 5, notes_item)
-            
-            # Mark this row as having pending changes
-            self.pending_changes_rows.add(new_row_index)
-            
-            # Store initial values as "original" for the new row
-            for col in range(self.data_table.columnCount()):
-                if col == 4:  # Payment Method column
-                    self.original_values[(new_row_index, col)] = ""  # Empty initially
-                else:
-                    item = self.data_table.item(new_row_index, col)
-                    self.original_values[(new_row_index, col)] = item.text() if item else ""
-            
-            # Reconnect the signal
-            self.data_table.itemChanged.connect(self.on_table_item_changed)
-            
-            # Focus on description field for immediate editing
-            self.data_table.setCurrentCell(new_row_index, 1)
-            self.data_table.editItem(self.data_table.item(new_row_index, 1))
-            
-            # Update confirm button visibility
-            self.update_confirm_button_visibility()
-            
-        except Exception as e:
-            self.sheet_status_label.setText(f"❌ Error adding row: {str(e)}")
-            # Reconnect signal in case of error
-            if not self.data_table.itemChanged.isSignalConnected():
-                self.data_table.itemChanged.connect(self.on_table_item_changed)
-    
-    def on_payment_method_changed(self, row: int, payment_method: str):
-        """Handle payment method dropdown changes."""
-        column = 4  # Payment Method column
-        
-        # Check if payment method value actually changed from original
-        if self.check_cell_changed(row, column):
-            # Track the changed cell
-            self.changed_cells.add((row, column))
-            # Apply highlighting to the changed cell
-            self.highlight_changed_cell(row, column)
-            # Mark this row as having pending changes
-            self.pending_changes_rows.add(row)
-        else:
-            # Payment method was reverted to original value
-            self.changed_cells.discard((row, column))
-            # Clear highlighting
-            widget = self.data_table.cellWidget(row, column)
-            if isinstance(widget, QComboBox):
-                widget.setStyleSheet("")  # Clear custom stylesheet
-            # Check if row still has other changes
-            row_has_changes = any((row, col) in self.changed_cells for col in range(self.data_table.columnCount()))
-            if not row_has_changes:
-                self.pending_changes_rows.discard(row)
-        
-        # Update confirm button visibility
-        self.update_confirm_button_visibility()
-    
-    def refresh_current_sheet(self):
-        """Refresh the current sheet data."""
-        # Clear pending changes when refreshing
-        self.pending_changes_rows.clear()
-        
-        # Clear cell highlighting
-        self.clear_cell_highlighting()
-        
-        # Update confirm button visibility
-        self.update_confirm_button_visibility()
-        
-        if self.current_sheet_name:
-            self.load_sheet_data(self.current_sheet_name)
-        else:
-            self.on_date_changed()
-    
-    def on_selection_changed(self):
-        """Handle table selection changes and update delete button visibility."""
-        selected_rows = set()
-        for item in self.data_table.selectedItems():
-            selected_rows.add(item.row())
-        
-        if selected_rows:
-            count = len(selected_rows)
-            row_text = "row" if count == 1 else "rows"
-            self.delete_button.setText(f"🗑️ Delete {count} {row_text}")
-            self.delete_button.setVisible(True)
-        else:
-            self.delete_button.setVisible(False)
-    
-    def delete_selected_expenses(self):
-        """Delete selected expense rows after confirmation."""
-        selected_rows = set()
-        for item in self.data_table.selectedItems():
-            selected_rows.add(item.row())
-        
-        if not selected_rows:
-            return
-        
-        if not self.current_sheet_name:
-            QMessageBox.warning(self, "No Sheet Selected", "Please select a month first.")
-            return
-        
-        # Get expense descriptions for confirmation
-        expense_descriptions = []
-        for row in sorted(selected_rows):
-            desc_item = self.data_table.item(row, 1)  # Description column
-            date_item = self.data_table.item(row, 0)  # Date column
-            if desc_item and date_item:
-                desc = desc_item.text() or "(no description)"
-                date = date_item.text() or "(no date)"
-                expense_descriptions.append(f"{date}: {desc}")
-        
-        # Confirmation dialog
-        count = len(selected_rows)
-        row_text = "row" if count == 1 else "rows"
-        expense_text = "expense" if count == 1 else "expenses"
-        
-        expenses_list = "\n".join([f"• {desc}" for desc in expense_descriptions[:5]])  # Show first 5
-        if len(expense_descriptions) > 5:
-            expenses_list += f"\n... and {len(expense_descriptions) - 5} more"
-        
-        reply = QMessageBox.question(
-            self, "Confirm Deletion",
-            f"Are you sure you want to delete {count} {expense_text}?\n\n{expenses_list}\n\n"
-            f"This action cannot be undone and will remove the expenses from the '{self.current_sheet_name}' sheet.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
-        
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-        
-        # Remove any pending changes for rows being deleted
-        for row in selected_rows:
-            self.pending_changes_rows.discard(row)
-        
-        # Delete from server
-        self.sheet_status_label.setText("🗑️ Deleting expenses...")
-        success_count = 0
-        error_count = 0
-        
-        # Separate new rows from existing rows for different deletion strategies
-        new_rows = []
-        existing_rows = []
-        
-        for row in selected_rows:
-            if self.is_new_row(row):
-                new_rows.append(row)
-            else:
-                existing_rows.append(row)
-        
-        # Delete new rows locally (just remove from table)
-        for row in sorted(new_rows, reverse=True):  # Reverse order to preserve indices
-            try:
-                self.data_table.removeRow(row)
-                success_count += 1
-            except Exception as e:
-                error_count += 1
-                print(f"Error removing local row {row}: {e}")
-        
-        # Delete existing rows from Google Sheets (this will cause rows below to move up)
-        if existing_rows:
-            try:
-                # Convert table row indices to sheet row numbers (add 2 for 0-based + header)
-                sheet_row_numbers = [row + 2 for row in existing_rows]
-                
-                # Use batch delete to remove all rows at once
-                success = self.sheets_service.delete_multiple_rows(
-                    self.spreadsheet_id,
-                    self.current_sheet_name,
-                    sheet_row_numbers
-                )
-                
-                if success:
-                    success_count += len(existing_rows)
-                    # Update server row count since we deleted rows from server
-                    self.server_row_count -= len(existing_rows)
-                else:
-                    error_count += len(existing_rows)
-                    
-            except Exception as e:
-                error_count += len(existing_rows)
-                print(f"Error deleting server rows: {e}")
-        
-        # Update status and refresh table
-        if error_count == 0:
-            self.sheet_status_label.setText(f"✅ Successfully deleted {success_count} {expense_text}")
-        else:
-            self.sheet_status_label.setText(f"⚠️ Deleted {success_count}, failed {error_count}. Check server connection.")
-        
-        # Refresh table to sync with server (this will show rows moved up)
-        self.load_sheet_data(self.current_sheet_name)
-        
-        # Hide delete button
-        self.delete_button.setVisible(False)
-        # Update confirm button visibility (in case pending changes were affected)
-        self.update_confirm_button_visibility()
-    
-    def _get_cache_status_indicator(self, sheet_name: str) -> str:
-        """Get cache status indicator for display in status label.
-        
-        Args:
-            sheet_name: Name of the sheet to check.
-            
-        Returns:
-            String indicator showing cache status.
-        """
-        try:
-            # Check if we have a cached service with cache info
-            if hasattr(self.sheets_service, 'cache_service'):
-                if self.sheets_service.cache_service.is_sheet_cached(sheet_name):
-                    return "📂"  # Cached
+            if hasattr(self.sheets_service, 'cache_service') and self.current_sheet_name:
+                sheet_key = self.current_sheet_name.lower().replace(' ', '-')
+                if self.sheets_service.cache_service.is_sheet_cached(sheet_key):
+                    return "📂"  # From cache
                 else:
                     return "🌐"  # From server
-            else:
-                return "🌐"  # Regular service (no cache)
+            return "🌐"
         except:
-            return ""  # No indicator on error
+            return ""
+    
+    def get_categories(self) -> List[str]:
+        """Get list of active categories for use in dropdowns.
+        
+        Returns:
+            List of active category names from Categories sheet.
+        """
+        try:
+            # Get categories data from the Categories sheet
+            range_name = "'Categories'!A:E"
+            df = self.sheets_service.get_data_as_dataframe(
+                self.spreadsheet_id, range_name, use_cache=True
+            )
+            
+            if df.empty:
+                return ["Food", "Transportation", "Shopping", "Bills", "Entertainment"]
+            
+            # Extract active categories (column 0 = name, column 4 = active status)
+            active_categories = []
+            for _, row in df.iterrows():
+                category_name = str(row.iloc[0]).strip() if pd.notna(row.iloc[0]) else ""
+                is_active = str(row.iloc[4]).strip().upper() in ["YES", "Y", "TRUE", "1"] if len(row) > 4 and pd.notna(row.iloc[4]) else True
+                
+                if category_name and is_active:
+                    active_categories.append(category_name)
+            
+            return active_categories if active_categories else ["Food", "Transportation", "Shopping", "Bills", "Entertainment"]
+            
+        except Exception as e:
+            print(f"Error loading categories: {e}")
+            return ["Food", "Transportation", "Shopping", "Bills", "Entertainment"]

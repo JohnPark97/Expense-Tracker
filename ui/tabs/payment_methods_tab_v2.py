@@ -27,15 +27,20 @@ class PaymentMethodsTab(BaseEditableTable):
                 component_type="text",
                 required=True,
                 tooltip="Name of the payment method (e.g., 'Credit Card', 'Cash')",
-                validation=self.validate_payment_method_name,
-                resize_mode="content"
+                validation=self.validate_payment_method_name
             ),
             ColumnConfig(
                 header="Description", 
                 component_type="text",
                 tooltip="Optional description of the payment method",
-                default_value="",
-                resize_mode="stretch"
+                default_value=""
+            ),
+            ColumnConfig(
+                header="Active",
+                component_type="dropdown",
+                options=["Yes", "No"],
+                tooltip="Whether this payment method is active and available for selection",
+                default_value="Yes"
             )
         ]
         
@@ -107,7 +112,7 @@ class PaymentMethodsTab(BaseEditableTable):
             self.status_label.setText("📂 Loading payment methods...")
             
             # Get data using the cached service
-            range_name = f"'{self.sheet_name}'!A:B"
+            range_name = f"'{self.sheet_name}'!A:C"
             df = self.sheets_service.get_data_as_dataframe(
                 self.spreadsheet_id, range_name, use_cache=True
             )
@@ -175,7 +180,7 @@ class PaymentMethodsTab(BaseEditableTable):
         try:
             # Get current server data to determine which rows are new
             df = self.sheets_service.get_data_as_dataframe(
-                self.spreadsheet_id, f"'{self.sheet_name}'!A:B", use_cache=False
+                self.spreadsheet_id, f"'{self.sheet_name}'!A:C", use_cache=False
             )
             current_server_rows = len(df)
             
@@ -192,7 +197,7 @@ class PaymentMethodsTab(BaseEditableTable):
                 if row < current_server_rows:
                     # Existing row - update
                     sheet_row = row + 2  # +2 for 1-based indexing and header
-                    range_str = f"A{sheet_row}:B{sheet_row}"
+                    range_str = f"A{sheet_row}:C{sheet_row}"
                     batch_updates.append({
                         'range': range_str,
                         'values': [row_data]
@@ -200,7 +205,7 @@ class PaymentMethodsTab(BaseEditableTable):
                 else:
                     # New row - append
                     next_row = current_server_rows + len([r for r in self.pending_changes_rows if r >= current_server_rows]) + 1
-                    range_str = f"A{next_row}:B{next_row}"
+                    range_str = f"A{next_row}:C{next_row}"
                     batch_updates.append({
                         'range': range_str,
                         'values': [row_data]
@@ -234,17 +239,18 @@ class PaymentMethodsTab(BaseEditableTable):
             return ""
     
     def get_active_payment_methods(self) -> List[str]:
-        """Get list of all payment methods for use in dropdowns.
+        """Get list of active payment methods for use in dropdowns.
         
         Returns:
-            List of all payment method names.
+            List of active payment method names.
         """
-        all_methods = []
+        active_methods = []
         
         for row in range(self.data_table.rowCount()):
             method_name = self.get_cell_value(row, 0).strip()
+            is_active = self.get_cell_value(row, 2).strip().upper() in ["YES", "Y", "TRUE", "1"]
             
-            if method_name:
-                all_methods.append(method_name)
+            if method_name and is_active:
+                active_methods.append(method_name)
         
-        return all_methods if all_methods else ["Cash", "Credit Card", "Debit Card"]
+        return active_methods if active_methods else ["Cash", "Credit Card", "Debit Card"]
