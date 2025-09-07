@@ -169,7 +169,7 @@ class OverviewTab(QWidget):
     
     def create_visualization_previews(self, layout: QGridLayout):
         """Create preview visualizations for the dashboard."""
-        # Row 0: Monthly Spending Overview (July - September 2025)
+        # Row 0: Monthly Spending Overview
         monthly_spending_container = VisualizationContainer(
             self.analytics_service,
             visualization_type="monthly_spending",
@@ -178,7 +178,7 @@ class OverviewTab(QWidget):
         monthly_spending_container.mode_changed.connect(self.on_visualization_mode_changed)
         self.visualization_containers["monthly_spending"] = monthly_spending_container
         
-        spending_group = QGroupBox("💰 Last 3 Months: July - September 2025")
+        spending_group = QGroupBox("💰 Monthly Spending Overview")
         spending_layout = QVBoxLayout(spending_group)
         spending_layout.addWidget(monthly_spending_container)
         layout.addWidget(spending_group, 0, 0, 1, 2)  # Span 2 columns

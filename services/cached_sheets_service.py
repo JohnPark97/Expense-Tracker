@@ -109,11 +109,27 @@ class CachedGoogleSheetsService:
                 rows = cached_data["rows"]
                 
                 if rows:
-                    df = pd.DataFrame(rows, columns=headers)
+                    # Fix column count mismatch by padding or trimming rows
+                    normalized_rows = []
+                    for row in rows:
+                        if len(row) < len(headers):
+                            # Pad row with empty strings
+                            padded_row = row + [''] * (len(headers) - len(row))
+                            normalized_rows.append(padded_row)
+                        elif len(row) > len(headers):
+                            # Trim row to match headers
+                            trimmed_row = row[:len(headers)]
+                            normalized_rows.append(trimmed_row)
+                        else:
+                            # Row length matches headers
+                            normalized_rows.append(row)
+                    
+                    df = pd.DataFrame(normalized_rows, columns=headers)
+                    print(f"📂 Using cached data for '{sheet_name}' ({len(normalized_rows)} rows, {len(headers)} columns)")
                 else:
                     df = pd.DataFrame(columns=headers)
+                    print(f"📂 Using cached data for '{sheet_name}' (0 rows, {len(headers)} columns)")
                 
-                print(f"📂 Using cached data for '{sheet_name}' ({len(rows)} rows)")
                 return df
         
         # Fallback to API call

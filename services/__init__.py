@@ -3,9 +3,11 @@
 from .google_sheets import GoogleSheetsService
 from .cache_service import SheetCacheService
 from .cached_sheets_service import CachedGoogleSheetsService
+from .analytics_service import AnalyticsService
 
 __all__ = [
     'GoogleSheetsService',
     'SheetCacheService', 
-    'CachedGoogleSheetsService'
+    'CachedGoogleSheetsService',
+    'AnalyticsService'
 ]

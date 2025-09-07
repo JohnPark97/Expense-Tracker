@@ -169,7 +169,7 @@ Instructions:
         self.setWindowTitle("📊 Expense Sheet Visualizer")
         
         # Create and add tabs
-        self.overview_tab = OverviewTab()
+        self.overview_tab = OverviewTab(self.sheets_service, self.spreadsheet_id)
         self.monthly_tab = MonthlyDataTab(self.sheets_service, self.spreadsheet_id)
         self.payment_methods_tab = PaymentMethodsTab(self.sheets_service, self.spreadsheet_id)
         self.categories_tab = CategoriesTab(self.sheets_service, self.spreadsheet_id)
