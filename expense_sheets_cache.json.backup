@@ -1,0 +1,129 @@
+{
+  "version": "1.0",
+  "last_updated_at": "2025-09-06T18:58:52.280336",
+  "spreadsheet_id": "1FejagUIgweoIjiR-QnlNq90K7kpx42JwhW1TzyorET4",
+  "data": {
+    "september-2025": {
+      "last_modified": "2025-09-06T18:58:52.280263",
+      "row_count": 4,
+      "headers": [
+        "Date",
+        "Description",
+        "Amount",
+        "Category",
+        "Category",
+        "Notes"
+      ],
+      "rows": [
+        [
+          "2025-09-06",
+          "cccccc",
+          "0.00",
+          "fffeeee",
+          "Credit Card",
+          "yessir"
+        ],
+        [
+          "2025-09-06",
+          "fawef",
+          "32.21",
+          "fffff",
+          "Simplii",
+          ""
+        ],
+        [
+          "2025-09-06",
+          "af",
+          "3",
+          "fff",
+          "",
+          ""
+        ],
+        [
+          "2025-09-06",
+          "changed",
+          "4",
+          "233",
+          "",
+          ""
+        ]
+      ],
+      "data_hash": "a19514e05283111a2415984a3639da9d"
+    },
+    "payment-methods": {
+      "last_modified": "2025-09-06T18:58:09.028125",
+      "row_count": 7,
+      "headers": [
+        "Payment Method",
+        "Description",
+        "Active"
+      ],
+      "rows": [
+        [
+          "Cash",
+          "Physical cash payments",
+          "Yes"
+        ],
+        [
+          "Debit Card",
+          "Bank debit card transactions",
+          "Yes"
+        ],
+        [
+          "Credit Card",
+          "Credit card payments",
+          "Yes"
+        ],
+        [
+          "Bank Transfer",
+          "Direct bank transfers",
+          "Yes"
+        ],
+        [
+          "Mobile Payment",
+          "Apps like Venmo, PayPal, etc.",
+          "Yes"
+        ],
+        [
+          "Check",
+          "Paper check payments",
+          "Yes"
+        ],
+        [
+          "Simplii",
+          "Restarurant",
+          "Yes"
+        ]
+      ],
+      "data_hash": "901ec7f5d4b69bedc13b3eb9ab74259f"
+    },
+    "october-2025": {
+      "last_modified": "2025-09-06T18:58:08.821156",
+      "row_count": 0,
+      "headers": [
+        "Date",
+        "Description",
+        "Amount",
+        "Category",
+        "Payment Method",
+        "Notes"
+      ],
+      "rows": [],
+      "data_hash": "fab106bfb9ef0d5668e2f30cbb28a525"
+    },
+    "december-2025": {
+      "last_modified": "2025-09-06T18:58:09.438873",
+      "row_count": 0,
+      "headers": [
+        "Date",
+        "Description",
+        "Amount",
+        "Category",
+        "Payment Method",
+        "Notes"
+      ],
+      "rows": [],
+      "data_hash": "fab106bfb9ef0d5668e2f30cbb28a525"
+    }
+  }
+}

@@ -1,0 +1,1 @@
+Sept 6 2025 - When confirm button is pressed, the highlighter for edited cell is not disappearing

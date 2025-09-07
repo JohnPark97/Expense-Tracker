@@ -542,6 +542,131 @@ class GoogleSheetsService:
             True if authenticated, False otherwise.
         """
         return self.service is not None and self.credentials is not None
+    
+    def delete_rows(self, spreadsheet_id: str, sheet_name: str, 
+                   start_row: int, num_rows: int = 1) -> bool:
+        """Delete rows from a sheet, causing rows below to move up.
+        
+        Args:
+            spreadsheet_id: The ID of the spreadsheet.
+            sheet_name: Name of the sheet.
+            start_row: Starting row number (1-based, includes header).
+            num_rows: Number of rows to delete.
+            
+        Returns:
+            True if rows deleted successfully, False otherwise.
+        """
+        try:
+            if not self.service:
+                raise Exception("Not authenticated with Google Sheets API")
+            
+            # Get the sheet ID
+            spreadsheet = self.service.spreadsheets().get(
+                spreadsheetId=spreadsheet_id
+            ).execute()
+            
+            sheet_id = None
+            for sheet in spreadsheet['sheets']:
+                if sheet['properties']['title'] == sheet_name:
+                    sheet_id = sheet['properties']['sheetId']
+                    break
+            
+            if sheet_id is None:
+                print(f"Could not find sheet ID for '{sheet_name}'")
+                return False
+            
+            # Create delete request
+            delete_request = {
+                'deleteDimension': {
+                    'range': {
+                        'sheetId': sheet_id,
+                        'dimension': 'ROWS',
+                        'startIndex': start_row - 1,  # Convert to 0-based
+                        'endIndex': start_row - 1 + num_rows  # Exclusive end
+                    }
+                }
+            }
+            
+            # Execute the delete
+            body = {'requests': [delete_request]}
+            self.service.spreadsheets().batchUpdate(
+                spreadsheetId=spreadsheet_id,
+                body=body
+            ).execute()
+            
+            print(f"Deleted {num_rows} row(s) starting at row {start_row} in sheet '{sheet_name}'")
+            return True
+            
+        except Exception as e:
+            print(f"Error deleting rows: {e}")
+            return False
+    
+    def delete_multiple_rows(self, spreadsheet_id: str, sheet_name: str, 
+                           row_numbers: List[int]) -> bool:
+        """Delete multiple rows efficiently in a single batch operation.
+        
+        Args:
+            spreadsheet_id: The ID of the spreadsheet.
+            sheet_name: Name of the sheet.
+            row_numbers: List of row numbers to delete (1-based, includes header).
+            
+        Returns:
+            True if all rows deleted successfully, False otherwise.
+        """
+        try:
+            if not self.service:
+                raise Exception("Not authenticated with Google Sheets API")
+            
+            if not row_numbers:
+                return True  # Nothing to delete
+            
+            # Get the sheet ID
+            spreadsheet = self.service.spreadsheets().get(
+                spreadsheetId=spreadsheet_id
+            ).execute()
+            
+            sheet_id = None
+            for sheet in spreadsheet['sheets']:
+                if sheet['properties']['title'] == sheet_name:
+                    sheet_id = sheet['properties']['sheetId']
+                    break
+            
+            if sheet_id is None:
+                print(f"Could not find sheet ID for '{sheet_name}'")
+                return False
+            
+            # Sort rows in descending order to delete from bottom up
+            # This prevents row indices from shifting during deletion
+            sorted_rows = sorted(row_numbers, reverse=True)
+            
+            # Create delete requests for each row
+            requests = []
+            for row_num in sorted_rows:
+                delete_request = {
+                    'deleteDimension': {
+                        'range': {
+                            'sheetId': sheet_id,
+                            'dimension': 'ROWS',
+                            'startIndex': row_num - 1,  # Convert to 0-based
+                            'endIndex': row_num  # Exclusive end (delete 1 row)
+                        }
+                    }
+                }
+                requests.append(delete_request)
+            
+            # Execute all deletes in a single batch
+            body = {'requests': requests}
+            self.service.spreadsheets().batchUpdate(
+                spreadsheetId=spreadsheet_id,
+                body=body
+            ).execute()
+            
+            print(f"Deleted {len(row_numbers)} rows in sheet '{sheet_name}': {sorted_rows}")
+            return True
+            
+        except Exception as e:
+            print(f"Error deleting multiple rows: {e}")
+            return False
 
 
 # Convenience function for backward compatibility

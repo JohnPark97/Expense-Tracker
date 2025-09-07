@@ -28,6 +28,8 @@ class MonthlyDataTab(QWidget):
         self.changed_cells = set()  # Track individual cells that have changed (row, col)
         self.original_values = {}  # Store original values for changed cells (row, col): value
         self.payment_methods = []  # Cache for payment methods
+        self._updating_highlights = False  # Flag to prevent recursion during highlighting
+        self.server_row_count = 0  # Track how many DATA rows came from server (excludes headers, for new row detection)
         self.setup_ui()
         self.setup_default_values()
     
@@ -147,7 +149,7 @@ class MonthlyDataTab(QWidget):
         
         # Table
         self.data_table = QTableWidget()
-        self.data_table.setAlternatingRowColors(True)
+        self.data_table.setAlternatingRowColors(False)  # Disabled to allow custom highlighting
         self.data_table.setSortingEnabled(False)  # Disable sorting to maintain data integrity
         self.data_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         
@@ -260,7 +262,10 @@ class MonthlyDataTab(QWidget):
             
             # Populate table with data
             self.populate_table_with_data(df)
-            self.sheet_status_label.setText(f"✅ Loaded {len(df)} rows from '{sheet_name}'")
+            
+            # Show cache status along with row count
+            cache_indicator = self._get_cache_status_indicator(sheet_name)
+            self.sheet_status_label.setText(f"✅ Loaded {len(df)} rows from '{sheet_name}' {cache_indicator}")
             
         except Exception as e:
             self.sheet_status_label.setText(f"❌ Error loading sheet: {str(e)}")
@@ -273,6 +278,10 @@ class MonthlyDataTab(QWidget):
         
         # Temporarily disconnect the signal to avoid triggering updates during population
         self.data_table.itemChanged.disconnect()
+        
+        # Update server row count - this is how many DATA rows exist on the server
+        # (headers are excluded since get_data_as_dataframe uses has_header=True by default)
+        self.server_row_count = len(df)
         
         self.data_table.setRowCount(len(df))
         self.data_table.setColumnCount(len(df.columns))
@@ -330,6 +339,9 @@ class MonthlyDataTab(QWidget):
         
         # Temporarily disconnect the signal
         self.data_table.itemChanged.disconnect()
+        
+        # New sheet has 0 rows from server
+        self.server_row_count = 0
         
         # Set up typical expense tracking columns (matching the service default headers)
         self.data_table.setRowCount(0)  # Start with no rows - user can add them
@@ -410,52 +422,75 @@ class MonthlyDataTab(QWidget):
     
     def highlight_changed_cell(self, row: int, col: int):
         """Apply eye-friendly highlighting to a changed cell."""
-        print(f"DEBUG: highlight_changed_cell called for ({row}, {col})")
-        
-        if col == 4:  # Payment Method column - dropdown widget
-            widget = self.data_table.cellWidget(row, col)
-            if isinstance(widget, QComboBox):
-                print(f"DEBUG: Applying yellow background to dropdown at ({row}, {col})")
-                # Apply yellow background color to dropdown to match other cells
-                widget.setStyleSheet("""
-                    QComboBox {
-                        background-color: #fff8e1;
-                        border: 1px solid #ffeaa7;
-                        border-radius: 3px;
-                        padding: 2px;
-                    }
-                    QComboBox:hover {
-                        background-color: #fff3cd;
-                    }
-                    QComboBox:drop-down {
-                        background-color: #fff8e1;
-                    }
-                """)
-        else:
-            # Regular text item
-            item = self.data_table.item(row, col)
-            if item:
-                print(f"DEBUG: Applying yellow background to text item at ({row}, {col})")
-                # Use a more visible yellow color for changed cells
-                item.setBackground(QColor(255, 248, 225))  # Light yellow/cream
+        # Prevent recursion during highlight updates
+        self._updating_highlights = True
+        try:
+            if col == 4:  # Payment Method column - dropdown widget
+                widget = self.data_table.cellWidget(row, col)
+                if isinstance(widget, QComboBox):
+                    # Apply yellow background color to dropdown to match other cells
+                    widget.setStyleSheet("""
+                        QComboBox {
+                            background-color: #ffeb82;
+                            border: 1px solid #ffeaa7;
+                            border-radius: 3px;
+                            padding: 2px;
+                        }
+                        QComboBox:hover {
+                            background-color: #ffe066;
+                        }
+                        QComboBox:drop-down {
+                            background-color: #ffeb82;
+                        }
+                    """)
+            else:
+                # Regular text item
+                item = self.data_table.item(row, col)
+                if item:
+                    print(f"Setting background color for item {item.text()} in row {row} and column {col}")
+                    # Try multiple approaches to ensure background sticks
+                    yellow_color = QColor(255, 235, 130)  # More visible yellow
+                    
+                    # Method 1: Standard setBackground
+                    item.setBackground(yellow_color)
+                    
+                    # Method 2: Via data role
+                    item.setData(Qt.ItemDataRole.BackgroundRole, yellow_color)
+                    
+                    # Method 3: Force refresh the item
+                    self.data_table.update(self.data_table.indexFromItem(item))
+                    
+                    # Method 4: Set a custom property for identification
+                    item.setData(Qt.ItemDataRole.UserRole, "changed_cell")
+                    
+                    print(f"Background color set for item {item.text()} in row {row} and column {col}")
+                    print(f"Item background after setting: {item.background().color().name()}")
+        finally:
+            self._updating_highlights = False
     
     def clear_cell_highlighting(self):
         """Clear highlighting from all cells."""
-        self.changed_cells.clear()
-        
-        for row in range(self.data_table.rowCount()):
-            for col in range(self.data_table.columnCount()):
-                if col == 4:  # Payment Method column - dropdown widget
-                    widget = self.data_table.cellWidget(row, col)
-                    if isinstance(widget, QComboBox):
-                        # Clear custom stylesheet
-                        widget.setStyleSheet("")
-                else:
-                    # Regular text item
-                    item = self.data_table.item(row, col)
-                    if item:
-                        # Clear background color
-                        item.setBackground(QColor())
+        # Prevent recursion during highlight clearing
+        self._updating_highlights = True
+        try:
+            self.changed_cells.clear()
+            
+            for row in range(self.data_table.rowCount()):
+                for col in range(self.data_table.columnCount()):
+                    if col == 4:  # Payment Method column - dropdown widget
+                        widget = self.data_table.cellWidget(row, col)
+                        if isinstance(widget, QComboBox):
+                            # Clear custom stylesheet
+                            widget.setStyleSheet("")
+                    else:
+                        # Regular text item
+                        item = self.data_table.item(row, col)
+                        if item:
+                            # Clear background color using both methods
+                            item.setBackground(QColor())
+                            item.setData(Qt.ItemDataRole.BackgroundRole, QColor())
+        finally:
+            self._updating_highlights = False
     
     def check_cell_changed(self, row: int, col: int) -> bool:
         """Check if a cell's value has changed from its original value."""
@@ -471,10 +506,24 @@ class MonthlyDataTab(QWidget):
         
         return current_value != original_value
     
+    def is_new_row(self, row: int) -> bool:
+        """Check if a row is a new row that hasn't been saved to the server yet.
+        
+        Args:
+            row: The row index to check (0-based, data rows only).
+            
+        Returns:
+            True if the row is new (added locally), False if it exists on the server.
+        """
+        # A row is "new" if its index is >= the number of data rows that came from the server
+        # Note: server_row_count excludes header rows since we use has_header=True
+        # Qt table rows are 0-indexed and contain only data (headers are separate)
+        return row >= self.server_row_count
+    
     def on_table_item_changed(self, item):
         """Handle table item changes and track for confirmation."""
-        if not self.current_sheet_name:
-            return
+        if not self.current_sheet_name or self._updating_highlights:
+            return  # Skip if no sheet or we're updating highlights to prevent recursion
         
         row = item.row()
         column = item.column()
@@ -495,7 +544,6 @@ class MonthlyDataTab(QWidget):
         
         # Check if cell value actually changed from original
         if self.check_cell_changed(row, column):
-            print(f"DEBUG: Cell ({row}, {column}) changed - applying yellow highlight")
             # Track the changed cell
             self.changed_cells.add((row, column))
             # Apply highlighting to the changed cell
@@ -503,11 +551,15 @@ class MonthlyDataTab(QWidget):
             # Mark this row as having pending changes
             self.pending_changes_rows.add(row)
         else:
-            print(f"DEBUG: Cell ({row}, {column}) reverted - clearing highlight")
             # Cell was reverted to original value
             self.changed_cells.discard((row, column))
-            # Clear highlighting
-            item.setBackground(QColor())  # Clear background for regular items
+            # Clear highlighting (prevent recursion)
+            self._updating_highlights = True
+            try:
+                item.setBackground(QColor())  # Clear background for regular items
+                item.setData(Qt.ItemDataRole.BackgroundRole, QColor())  # Clear data role too
+            finally:
+                self._updating_highlights = False
             # Check if row still has other changes
             row_has_changes = any((row, col) in self.changed_cells for col in range(self.data_table.columnCount()))
             if not row_has_changes:
@@ -552,22 +604,31 @@ class MonthlyDataTab(QWidget):
             # CRITICAL: Disconnect signals to prevent re-triggering during cleanup
             self.data_table.itemChanged.disconnect()
             
+            # Update server row count - all current DATA rows are now saved to server
+            # (Qt table rowCount() only counts data rows, headers are separate)
+            self.server_row_count = self.data_table.rowCount()
+            
             # Clear all tracking data in one go
             self.pending_changes_rows.clear()
             self.changed_cells.clear()
             
-            # Clear visual highlighting
-            for row in range(self.data_table.rowCount()):
-                for col in range(self.data_table.columnCount()):
-                    if col == 4:  # Payment Method column - dropdown widget
-                        widget = self.data_table.cellWidget(row, col)
-                        if isinstance(widget, QComboBox):
-                            widget.setStyleSheet("")
-                    else:
-                        # Regular text item
-                        item = self.data_table.item(row, col)
-                        if item:
-                            item.setBackground(QColor())
+            # Clear visual highlighting (prevent recursion)
+            self._updating_highlights = True
+            try:
+                for row in range(self.data_table.rowCount()):
+                    for col in range(self.data_table.columnCount()):
+                        if col == 4:  # Payment Method column - dropdown widget
+                            widget = self.data_table.cellWidget(row, col)
+                            if isinstance(widget, QComboBox):
+                                widget.setStyleSheet("")
+                        else:
+                            # Regular text item
+                            item = self.data_table.item(row, col)
+                            if item:
+                                item.setBackground(QColor())
+                                item.setData(Qt.ItemDataRole.BackgroundRole, QColor())
+            finally:
+                self._updating_highlights = False
             
             # Store new values as original values (refresh baseline) WITHOUT triggering signals
             self.original_values.clear()
@@ -609,20 +670,26 @@ class MonthlyDataTab(QWidget):
                     for col in range(self.data_table.columnCount()):
                         successfully_saved_cells.add((row, col))
             
-            # Clear highlighting only for successfully saved cells
-            for row, col in successfully_saved_cells:
-                if col == 4:  # Payment Method column - dropdown widget
-                    widget = self.data_table.cellWidget(row, col)
-                    if isinstance(widget, QComboBox):
-                        widget.setStyleSheet("")
-                else:
-                    # Regular text item
-                    item = self.data_table.item(row, col)
-                    if item:
-                        item.setBackground(QColor())
-                
-                # Remove from changed_cells if it was there
-                self.changed_cells.discard((row, col))
+            # Clear highlighting only for successfully saved cells (prevent recursion)
+            self._updating_highlights = True
+            try:
+                for row, col in successfully_saved_cells:
+                    if col == 4:  # Payment Method column - dropdown widget
+                        widget = self.data_table.cellWidget(row, col)
+                        if isinstance(widget, QComboBox):
+                            widget.setStyleSheet("")
+                    else:
+                        # Regular text item
+                        item = self.data_table.item(row, col)
+                        if item:
+                            # TODO: This is currently not working but it's not critical
+                            item.setBackground(QColor())
+                            item.setData(Qt.ItemDataRole.BackgroundRole, QColor())
+                    
+                    # Remove from changed_cells if it was there
+                    self.changed_cells.discard((row, col))
+            finally:
+                self._updating_highlights = False
             
             # Update original values for successfully saved rows
             self.store_original_values()
@@ -637,6 +704,7 @@ class MonthlyDataTab(QWidget):
             df = self.sheets_service.get_data_as_dataframe(
                 self.spreadsheet_id, f"'{self.current_sheet_name}'!A:Z"
             )
+            # server_row_count = number of data rows on server (excluding header row)
             server_row_count = len(df)
             
             # Collect all changes into batch updates
@@ -780,7 +848,6 @@ class MonthlyDataTab(QWidget):
         
         # Check if payment method value actually changed from original
         if self.check_cell_changed(row, column):
-            print(f"DEBUG: Payment method ({row}, {column}) changed - applying yellow highlight")
             # Track the changed cell
             self.changed_cells.add((row, column))
             # Apply highlighting to the changed cell
@@ -788,7 +855,6 @@ class MonthlyDataTab(QWidget):
             # Mark this row as having pending changes
             self.pending_changes_rows.add(row)
         else:
-            print(f"DEBUG: Payment method ({row}, {column}) reverted - clearing highlight")
             # Payment method was reverted to original value
             self.changed_cells.discard((row, column))
             # Clear highlighting
@@ -885,37 +951,48 @@ class MonthlyDataTab(QWidget):
         success_count = 0
         error_count = 0
         
-        # Sort rows in reverse order to delete from bottom up (preserves row indices)
-        for row in sorted(selected_rows, reverse=True):
+        # Separate new rows from existing rows for different deletion strategies
+        new_rows = []
+        existing_rows = []
+        
+        for row in selected_rows:
+            if self.is_new_row(row):
+                new_rows.append(row)
+            else:
+                existing_rows.append(row)
+        
+        # Delete new rows locally (just remove from table)
+        for row in sorted(new_rows, reverse=True):  # Reverse order to preserve indices
             try:
-                # Check if this is a new row that hasn't been saved yet
-                is_new_row = self.is_new_row(row)
-                
-                if is_new_row:
-                    # For new rows, just remove from the table locally
-                    self.data_table.removeRow(row)
-                    success_count += 1
-                else:
-                    # For existing rows, delete from Google Sheets
-                    sheet_row = row + 2  # Account for header row
-                    
-                    # Delete the row by clearing its contents
-                    success = self.sheets_service.update_sheet_data(
-                        self.spreadsheet_id,
-                        self.current_sheet_name,
-                        [["", "", "", "", "", ""]],  # Empty row (6 columns)
-                        f"A{sheet_row}"
-                    )
-                    
-                    if success:
-                        success_count += 1
-                    else:
-                        error_count += 1
-                        print(f"Failed to delete expense row {row}")
-                        
+                self.data_table.removeRow(row)
+                success_count += 1
             except Exception as e:
                 error_count += 1
-                print(f"Error deleting row {row}: {e}")
+                print(f"Error removing local row {row}: {e}")
+        
+        # Delete existing rows from Google Sheets (this will cause rows below to move up)
+        if existing_rows:
+            try:
+                # Convert table row indices to sheet row numbers (add 2 for 0-based + header)
+                sheet_row_numbers = [row + 2 for row in existing_rows]
+                
+                # Use batch delete to remove all rows at once
+                success = self.sheets_service.delete_multiple_rows(
+                    self.spreadsheet_id,
+                    self.current_sheet_name,
+                    sheet_row_numbers
+                )
+                
+                if success:
+                    success_count += len(existing_rows)
+                    # Update server row count since we deleted rows from server
+                    self.server_row_count -= len(existing_rows)
+                else:
+                    error_count += len(existing_rows)
+                    
+            except Exception as e:
+                error_count += len(existing_rows)
+                print(f"Error deleting server rows: {e}")
         
         # Update status and refresh table
         if error_count == 0:
@@ -923,12 +1000,31 @@ class MonthlyDataTab(QWidget):
         else:
             self.sheet_status_label.setText(f"⚠️ Deleted {success_count}, failed {error_count}. Check server connection.")
         
-        # Update confirm button visibility (in case pending changes were affected)
-        self.update_confirm_button_visibility()
-        
-        # Refresh the table to show current state (only for server-saved data)
-        if any(not self.is_new_row(row) for row in selected_rows):
-            self.load_sheet_data(self.current_sheet_name)
+        # Refresh table to sync with server (this will show rows moved up)
+        self.load_sheet_data(self.current_sheet_name)
         
         # Hide delete button
         self.delete_button.setVisible(False)
+        # Update confirm button visibility (in case pending changes were affected)
+        self.update_confirm_button_visibility()
+    
+    def _get_cache_status_indicator(self, sheet_name: str) -> str:
+        """Get cache status indicator for display in status label.
+        
+        Args:
+            sheet_name: Name of the sheet to check.
+            
+        Returns:
+            String indicator showing cache status.
+        """
+        try:
+            # Check if we have a cached service with cache info
+            if hasattr(self.sheets_service, 'cache_service'):
+                if self.sheets_service.cache_service.is_sheet_cached(sheet_name):
+                    return "📂"  # Cached
+                else:
+                    return "🌐"  # From server
+            else:
+                return "🌐"  # Regular service (no cache)
+        except:
+            return ""  # No indicator on error

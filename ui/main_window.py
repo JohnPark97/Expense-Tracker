@@ -6,13 +6,13 @@ Main application window with login interface and tabbed main interface.
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QPushButton, QLabel, QMessageBox, QStatusBar, 
-    QProgressBar, QGroupBox, QTabWidget
+    QProgressBar, QGroupBox, QTabWidget, QMenuBar, QMenu
 )
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QFont, QAction
 from typing import Optional
 
-from services.google_sheets import GoogleSheetsService
+from services.cached_sheets_service import CachedGoogleSheetsService
 from ui.tabs.overview_tab import OverviewTab
 from ui.tabs.monthly_data_tab import MonthlyDataTab
 from ui.tabs.payment_methods_tab import PaymentMethodsTab
@@ -32,6 +32,7 @@ class MainWindow(QMainWindow):
         self.sheets_service = None
         self.is_authenticated = False
         self.spreadsheet_id = "1FejagUIgweoIjiR-QnlNq90K7kpx42JwhW1TzyorET4"  # Default spreadsheet
+        self.cache_initialized = False
         
         # UI state
         self.login_widget = None
@@ -177,6 +178,9 @@ Instructions:
         
         # Set default tab
         self.tabs_widget.setCurrentIndex(0)
+        
+        # Setup cache management menu
+        self.setup_cache_menu()
     
     def setup_status_bar(self):
         """Setup the status bar."""
@@ -190,8 +194,11 @@ Instructions:
     def check_existing_auth(self):
         """Check if user is already authenticated."""
         try:
-            # Try to create service with existing token
-            self.sheets_service = GoogleSheetsService()
+            # Try to create cached service with existing token
+            self.sheets_service = CachedGoogleSheetsService(
+                spreadsheet_id=self.spreadsheet_id,
+                cache_file="expense_sheets_cache.json"
+            )
             if self.sheets_service.is_authenticated():
                 self.on_auth_success()
             else:
@@ -233,13 +240,22 @@ Instructions:
     def on_auth_success(self):
         """Handle successful authentication."""
         self.is_authenticated = True
-        self.sheets_service = self.auth_thread.sheets_service if hasattr(self, 'auth_thread') else self.sheets_service
+        
+        # If we came from auth thread, we need to recreate the cached service
+        if hasattr(self, 'auth_thread') and self.auth_thread.sheets_service:
+            # Create cached service wrapper around authenticated service
+            self.sheets_service = CachedGoogleSheetsService(
+                spreadsheet_id=self.spreadsheet_id,
+                cache_file="expense_sheets_cache.json"
+            )
+            # The service should already be authenticated since auth_thread succeeded
         
         # Switch to main tabbed interface
         self.setup_tabs_ui()
         
-        # Update status
-        self.status_label.setText("✅ Successfully authenticated with Google Sheets - Ready to use!")
+        # Initialize cache in background
+        self.status_label.setText("🔄 Loading data and initializing cache...")
+        QTimer.singleShot(100, self.initialize_cache_async)
     
     def on_auth_failed(self, error_message: str):
         """Handle authentication failure."""
@@ -268,6 +284,158 @@ Instructions:
         self.is_authenticated = False
         self.auth_status_label.setText("🔴 Not connected to Google Sheets")
         self.status_label.setText("Ready to connect - Click login button")
+    
+    def initialize_cache_async(self):
+        """Initialize cache in background to avoid blocking UI."""
+        if not self.cache_initialized and self.sheets_service:
+            try:
+                # Initialize cache (fetches fresh data from server)
+                self.sheets_service.initialize_cache_on_startup()
+                self.cache_initialized = True
+                
+                # Update UI
+                stats = self.sheets_service.get_cache_stats()
+                cache_info = f"✅ Data loaded from cache ({stats['sheet_count']} sheets, {stats['total_rows']} rows)"
+                self.status_label.setText(cache_info)
+                
+                # Clear status message after 5 seconds
+                QTimer.singleShot(5000, lambda: self.status_label.setText("Ready"))
+                
+            except Exception as e:
+                print(f"❌ Error initializing cache: {e}")
+                self.status_label.setText(f"⚠️ Cache initialization failed: {str(e)}")
+                QTimer.singleShot(3000, lambda: self.status_label.setText("Ready"))
+    
+    def setup_cache_menu(self):
+        """Setup cache management menu."""
+        menubar = self.menuBar()
+        
+        # Cache menu
+        cache_menu = menubar.addMenu("📂 Cache")
+        
+        # View cache stats
+        stats_action = QAction("📈 View Cache Stats", self)
+        stats_action.triggered.connect(self.show_cache_stats)
+        cache_menu.addAction(stats_action)
+        
+        cache_menu.addSeparator()
+        
+        # Refresh cache
+        refresh_action = QAction("🔄 Refresh All Data", self)
+        refresh_action.triggered.connect(self.refresh_cache)
+        cache_menu.addAction(refresh_action)
+        
+        # Clear cache
+        clear_action = QAction("🧹 Clear Cache", self)
+        clear_action.triggered.connect(self.clear_cache)
+        cache_menu.addAction(clear_action)
+        
+        # Help menu
+        help_menu = menubar.addMenu("❓ Help")
+        
+        about_action = QAction("📜 About", self)
+        about_action.triggered.connect(self.show_about)
+        help_menu.addAction(about_action)
+    
+    def show_cache_stats(self):
+        """Show cache statistics dialog."""
+        if not self.sheets_service:
+            QMessageBox.warning(self, "No Service", "No sheets service available.")
+            return
+            
+        try:
+            stats = self.sheets_service.get_cache_stats()
+            
+            message = f"""
+Cache Statistics:
+
+📁 File: {stats['cache_file']}
+📈 Size: {stats['file_size_kb']} KB
+🕰 Last Updated: {stats['last_updated']}
+📋 Sheets: {stats['sheet_count']}
+📝 Total Rows: {stats['total_rows']}
+
+Sheet Details:"""
+            
+            for sheet_name, sheet_info in stats.get('sheets', {}).items():
+                message += f"\n  • {sheet_name}: {sheet_info['row_count']} rows"
+            
+            QMessageBox.information(self, "Cache Statistics", message)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error getting cache stats: {e}")
+    
+    def clear_cache(self):
+        """Clear all cached data."""
+        if not self.sheets_service:
+            QMessageBox.warning(self, "No Service", "No sheets service available.")
+            return
+            
+        reply = QMessageBox.question(
+            self, "Clear Cache", 
+            "Clear all cached data? This will refetch data from Google Sheets on next access.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                self.sheets_service.clear_cache()
+                self.cache_initialized = False
+                QMessageBox.information(self, "Cache Cleared", "Cache cleared successfully!")
+                
+                # Re-initialize cache
+                self.status_label.setText("🔄 Reinitializing cache...")
+                QTimer.singleShot(500, self.initialize_cache_async)
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Error clearing cache: {e}")
+    
+    def refresh_cache(self):
+        """Refresh all cached data from server."""
+        if not self.sheets_service:
+            QMessageBox.warning(self, "No Service", "No sheets service available.")
+            return
+            
+        reply = QMessageBox.question(
+            self, "Refresh Cache", 
+            "Refresh all data from Google Sheets? This will update the cache with latest server data.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                self.status_label.setText("🔄 Refreshing all data from server...")
+                
+                # Clear cache first
+                self.sheets_service.clear_cache()
+                self.cache_initialized = False
+                
+                # Re-initialize with fresh data
+                QTimer.singleShot(100, self.initialize_cache_async)
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Error refreshing cache: {e}")
+                self.status_label.setText("Ready")
+    
+    def show_about(self):
+        """Show about dialog."""
+        message = f"""
+📋 Expense Sheet Visualizer
+
+A modern desktop application for managing expense data with Google Sheets.
+
+Features:
+• Real-time synchronization with Google Sheets
+• Intelligent caching for improved performance  
+• Multiple sheet management
+• Payment method tracking
+• Batch operations and conflict resolution
+
+Cache Status: {'Initialized' if self.cache_initialized else 'Not initialized'}
+Authentication: {'Connected' if self.is_authenticated else 'Not connected'}
+        """
+        
+        QMessageBox.about(self, "About Expense Sheet Visualizer", message)
     
     def closeEvent(self, event):
         """Handle application closing."""

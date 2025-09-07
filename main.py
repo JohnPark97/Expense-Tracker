@@ -83,17 +83,12 @@ def main():
         show-decoration-selected: 0;
     }
     QTableWidget::item {
-        background-color: #ffffff;
         color: #000000;
         border: none;
         padding: 4px;
         outline: none;
     }
-    QTableWidget::item:alternate {
-        background-color: #f8f9fa;
-    }
     QTableWidget::item:selected {
-        background-color: #b3d9ff;
         color: #000000;
         outline: none;
     }
