@@ -5,15 +5,16 @@ Main dashboard with previews of key visualizations and progressive disclosure.
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, 
-    QGridLayout, QGroupBox, QPushButton, QMessageBox
+    QGridLayout, QGroupBox, QPushButton, QMessageBox, QStackedWidget
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont
 from typing import Optional
 
 from services.cached_sheets_service import CachedGoogleSheetsService
 from services.analytics_service import AnalyticsService
 from ui.components.visualization_container import VisualizationContainer
+from ui.components.monthly_detail_grid import MonthlyDetailGrid
 from ui.components.base_chart import ChartMode
 
 
@@ -31,6 +32,8 @@ class OverviewTab(QWidget):
         # UI state
         self.visualization_containers = {}
         self.is_initialized = False
+        self.detail_grid = None
+        self._switching_views = False  # Flag to prevent recursion
         
         self.setup_ui()
         
@@ -46,12 +49,25 @@ class OverviewTab(QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(15)
         
-        # Header
-        self.create_header(layout)
+        # Stacked widget for overview vs detail grid switching
+        self.stack = QStackedWidget()
+        layout.addWidget(self.stack)
+        
+        # Overview page
+        self.overview_page = QWidget()
+        overview_layout = QVBoxLayout(self.overview_page)
+        overview_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Header for overview
+        self.create_header(overview_layout)
         
         # Main content area (will contain visualizations or placeholder)
         self.main_content = QWidget()
-        layout.addWidget(self.main_content)
+        overview_layout.addWidget(self.main_content)
+        
+        self.stack.addWidget(self.overview_page)
+        
+        # Detail grid page will be added when needed
     
     def create_header(self, layout: QVBoxLayout):
         """Create the dashboard header."""
@@ -128,6 +144,9 @@ class OverviewTab(QWidget):
         self.sheets_service = sheets_service
         self.spreadsheet_id = spreadsheet_id
         self.analytics_service = AnalyticsService(sheets_service, spreadsheet_id)
+        
+        # Create detail grid page
+        self.create_detail_grid()
         
         self.status_label.setText("Initializing analytics...")
         
@@ -236,12 +255,18 @@ class OverviewTab(QWidget):
     
     def on_visualization_mode_changed(self, mode: str):
         """Handle visualization mode changes."""
-        if mode == ChartMode.FULL or mode == ChartMode.DETAIL:
-            # Hide dashboard, show full visualization
-            self.hide_dashboard_controls()
+        # Prevent recursion when we're already switching views
+        if self._switching_views:
+            return
+            
+        if mode == ChartMode.FULL:
+            # Switch to detail grid page
+            print("🔄 Switching to detail grid view...")
+            self.show_detail_grid()
         else:
-            # Back to preview mode, show dashboard
-            self.show_dashboard_controls()
+            # Back to overview page  
+            print("🔄 Switching back to overview...")
+            self.show_overview()
     
     def hide_dashboard_controls(self):
         """Hide dashboard-level controls when in detailed view."""
@@ -285,3 +310,34 @@ class OverviewTab(QWidget):
         """Update services after authentication."""
         if not self.is_initialized:
             self.initialize_with_services(sheets_service, spreadsheet_id)
+    
+    def create_detail_grid(self):
+        """Create the monthly detail grid page."""
+        if not self.analytics_service:
+            return
+            
+        self.detail_grid = MonthlyDetailGrid(self.analytics_service)
+        self.detail_grid.back_to_overview.connect(self.show_overview)
+        self.stack.addWidget(self.detail_grid)
+        
+    def show_detail_grid(self):
+        """Switch to detail grid view."""
+        if self.detail_grid:
+            print("📊 Loading detail grid data...")
+            self.detail_grid.load_all_months()
+            self.stack.setCurrentWidget(self.detail_grid)
+        
+    def show_overview(self):
+        """Switch back to overview page."""
+        print("🏠 Returning to overview...")
+        self.stack.setCurrentWidget(self.overview_page)
+        
+        # Prevent recursion while resetting modes
+        self._switching_views = True
+        try:
+            # Reset all visualization containers to preview mode
+            for container in self.visualization_containers.values():
+                if hasattr(container, 'set_current_mode'):
+                    container.set_current_mode(ChartMode.PREVIEW)
+        finally:
+            self._switching_views = False
