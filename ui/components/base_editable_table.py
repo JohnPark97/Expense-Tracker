@@ -470,6 +470,46 @@ class BaseEditableTable(QWidget):
         # or use a generic implementation
         pass
     
+    def populate_table_with_data(self, df: pd.DataFrame):
+        """Populate table with data from DataFrame.
+        
+        This is a generic implementation that works for most cases.
+        Subclasses can override if they need custom behavior.
+        
+        Args:
+            df: DataFrame containing the data to populate.
+        """
+        # Temporarily disconnect signals to avoid triggering change events
+        self.data_table.itemChanged.disconnect()
+        
+        # Set row count and track server data
+        self.server_row_count = len(df)
+        self.data_table.setRowCount(len(df))
+        
+        # Populate each cell
+        for row in range(len(df)):
+            for col in range(min(len(df.columns), len(self.columns_config))):
+                value = str(df.iloc[row, col]) if pd.notna(df.iloc[row, col]) else ""
+                component = self.create_cell_component(row, col, value)
+                
+                # Set widget or item depending on component type
+                if hasattr(component, 'currentText'):
+                    # It's a widget (like QComboBox)
+                    self.data_table.setCellWidget(row, col, component)
+                else:
+                    # It's a table item
+                    self.data_table.setItem(row, col, component)
+        
+        # Reset change tracking state
+        self.store_original_values()
+        self.pending_changes_rows.clear()
+        self.changed_cells.clear()
+        self.clear_all_highlighting()
+        self.update_confirm_button_visibility()
+        
+        # Reconnect signals
+        self.data_table.itemChanged.connect(self.on_table_item_changed)
+    
     def refresh_data(self):
         """Refresh data from the server."""
         self.status_label.setText("🔄 Refreshing data...")
@@ -483,6 +523,30 @@ class BaseEditableTable(QWidget):
             return self.sheets_service.get_payment_methods(self.spreadsheet_id)
         except:
             return ["Cash", "Credit Card", "Debit Card"]
+    
+    def get_accounts(self) -> List[str]:
+        """Get account names for dropdowns."""
+        try:
+            df = self.sheets_service.get_data_as_dataframe(
+                self.spreadsheet_id, "'Accounts'!A:H", use_cache=True
+            )
+            if df.empty:
+                return ["Cash"]
+            
+            # Get account names from column B (index 1) - the Name column
+            if len(df.columns) > 1:
+                account_names = df.iloc[:, 1].tolist()  # Second column (Name)
+            else:
+                account_names = df.iloc[:, 0].tolist()  # First column as fallback
+                
+            # Filter out empty/null values and return as strings
+            import pandas as pd
+            valid_accounts = [str(acc) for acc in account_names if pd.notna(acc) and str(acc).strip()]
+            return valid_accounts if valid_accounts else ["Cash"]
+            
+        except Exception as e:
+            print(f"Error getting accounts: {e}")
+            return ["Cash"]
     
     def on_table_item_changed(self, item):
         """Handle table item changes."""

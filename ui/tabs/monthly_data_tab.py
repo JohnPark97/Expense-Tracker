@@ -67,10 +67,10 @@ class MonthlyDataTab(BaseEditableTable):
                 resize_mode="content"
             ),
             ColumnConfig(
-                header="Payment Method",
+                header="Account",
                 component_type="dropdown",
-                options_source="get_payment_methods",
-                tooltip="Payment method used",
+                options_source="get_accounts",
+                tooltip="Account used for this expense",
                 component_config={"editable": True},
                 resize_mode="content"
             ),
@@ -322,59 +322,6 @@ class MonthlyDataTab(BaseEditableTable):
         except Exception as e:
             self.status_label.setText(f"❌ Error loading data: {e}")
             self.show_empty_table()
-    
-    def populate_table_with_data(self, df: pd.DataFrame):
-        """Populate table with expense data."""
-        # Temporarily disconnect signals
-        self.data_table.itemChanged.disconnect()
-        
-        # Update server row count
-        self.server_row_count = len(df)
-        
-        # Set table size  
-        self.data_table.setRowCount(len(df))
-        
-        # Load dropdown options
-        categories = self.get_categories()
-        payment_methods = self.get_payment_methods()
-        
-        # Populate rows
-        for row in range(len(df)):
-            for col in range(min(len(df.columns), len(self.columns_config))):
-                value = str(df.iloc[row, col]) if pd.notna(df.iloc[row, col]) else ""
-                
-                # Create component
-                component = self.create_cell_component(row, col, value)
-                
-                # Special handling for dropdown columns
-                if col == 3 and hasattr(component, 'addItems'):  # Category column
-                    # Clear and repopulate options
-                    component.clear()
-                    component.addItems(categories)
-                    component.setCurrentText(value)
-                elif col == 4 and hasattr(component, 'addItems'):  # Payment method column
-                    # Clear and repopulate options
-                    component.clear()
-                    component.addItems(payment_methods)
-                    component.setCurrentText(value)
-                
-                # Set component in table
-                if hasattr(component, 'currentText'):  # It's a widget
-                    self.data_table.setCellWidget(row, col, component)
-                else:  # It's a table item
-                    self.data_table.setItem(row, col, component)
-        
-        # Column widths are now configured by BaseEditableTable based on ColumnConfig resize_mode
-        
-        # Store original values and clear changes
-        self.store_original_values()
-        self.pending_changes_rows.clear()
-        self.changed_cells.clear()
-        self.clear_all_highlighting()
-        self.update_confirm_button_visibility()
-        
-        # Reconnect signals
-        self.data_table.itemChanged.connect(self.on_table_item_changed)
     
     def validate_date(self, date_str: str) -> bool:
         """Validate date string."""

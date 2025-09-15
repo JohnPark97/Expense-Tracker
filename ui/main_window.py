@@ -15,8 +15,8 @@ from typing import Optional
 from services.cached_sheets_service import CachedGoogleSheetsService
 from ui.tabs.overview_tab import OverviewTab
 from ui.tabs.monthly_data_tab import MonthlyDataTab
-from ui.tabs.payment_methods_tab import PaymentMethodsTab
 from ui.tabs.categories_tab import CategoriesTab
+from ui.tabs.accounts_tab import AccountsTab
 from ui.threads.auth_thread import AuthThread
 
 
@@ -171,12 +171,12 @@ Instructions:
         # Create and add tabs
         self.overview_tab = OverviewTab(self.sheets_service, self.spreadsheet_id)
         self.monthly_tab = MonthlyDataTab(self.sheets_service, self.spreadsheet_id)
-        self.payment_methods_tab = PaymentMethodsTab(self.sheets_service, self.spreadsheet_id)
         self.categories_tab = CategoriesTab(self.sheets_service, self.spreadsheet_id)
+        self.accounts_tab = AccountsTab(self.sheets_service, self.spreadsheet_id)
         
         self.tabs_widget.addTab(self.overview_tab, "📊 Overview")
+        self.tabs_widget.addTab(self.accounts_tab, "🏦 Accounts")
         self.tabs_widget.addTab(self.monthly_tab, "📅 Monthly Data")
-        self.tabs_widget.addTab(self.payment_methods_tab, "💳 Payment Methods")
         self.tabs_widget.addTab(self.categories_tab, "🏷️ Categories")
         
         # Set default tab
