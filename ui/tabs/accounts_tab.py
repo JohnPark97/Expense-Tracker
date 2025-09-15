@@ -10,8 +10,11 @@ from PySide6.QtWidgets import QMessageBox, QInputDialog, QVBoxLayout, QHBoxLayou
 from PySide6.QtCore import Qt, Signal
 
 from models.account_model import Account, AccountType, Currency, get_account_type_display_name
+from models.account_holder_model import AccountHolder
 from services.account_service import AccountService, BalanceChangeEvent
+from services.account_holder_service import AccountHolderService
 from repositories.account_repository import AccountRepository, TransactionRepository
+from repositories.account_holder_repository import AccountHolderRepository
 from services.cached_sheets_service import CachedGoogleSheetsService
 from ui.components import BaseEditableTable, ColumnConfig
 
@@ -35,6 +38,10 @@ class AccountsTab(BaseEditableTable):
         self.account_repo = AccountRepository(sheets_service, spreadsheet_id)
         self.transaction_repo = TransactionRepository(sheets_service, spreadsheet_id)
         self.account_service = AccountService(self.account_repo, self.transaction_repo)
+        
+        # Initialize account holder services
+        self.account_holder_repo = AccountHolderRepository(sheets_service, spreadsheet_id)
+        self.account_holder_service = AccountHolderService(self.account_holder_repo)
         
         # Subscribe to balance change events
         self.account_service.subscribe_to_balance_changes(self._on_balance_change)
@@ -83,6 +90,15 @@ class AccountsTab(BaseEditableTable):
                 header="Notes",
                 component_type="text",
                 tooltip="Optional notes about this account",
+                default_value="",
+                resize_mode="content",
+                width=200
+            ),
+            ColumnConfig(
+                header="Account Holder",
+                component_type="dropdown",
+                options_source="get_account_holders",
+                tooltip="Person who owns/manages this account",
                 default_value="",
                 resize_mode="stretch"
             )
@@ -224,12 +240,20 @@ class AccountsTab(BaseEditableTable):
             # Convert accounts to DataFrame rows
             rows = []
             for account in accounts:
+                # Get account holder name
+                account_holder_name = ""
+                if account.account_holder_id:
+                    holder = self.account_holder_service.get_account_holder_by_id(account.account_holder_id)
+                    if holder:
+                        account_holder_name = holder.name
+                
                 row = [
                     account.name,
                     get_account_type_display_name(account.account_type),
                     f"{account.current_balance:.2f}",
                     account.currency.value,
-                    account.notes or ""
+                    account.notes or "",
+                    account_holder_name
                 ]
                 rows.append(row)
             
@@ -275,6 +299,7 @@ class AccountsTab(BaseEditableTable):
                     balance_str = row[2].strip() if len(row) > 2 else "0.00"
                     currency_str = row[3].strip() if len(row) > 3 else "CAD"
                     notes = row[4].strip() if len(row) > 4 else ""
+                    account_holder_name = row[5].strip() if len(row) > 5 else ""
                     
                     if not account_name:
                         continue
@@ -299,6 +324,13 @@ class AccountsTab(BaseEditableTable):
                     except ValueError:
                         pass
                     
+                    # Find account holder ID by name
+                    account_holder_id = None
+                    if account_holder_name:
+                        holder = self.account_holder_service.get_account_holder_by_name(account_holder_name)
+                        if holder:
+                            account_holder_id = holder.id
+                    
                     # Check if this is an update or create
                     existing_account = existing_by_name.get(account_name)
                     
@@ -309,6 +341,7 @@ class AccountsTab(BaseEditableTable):
                         existing_account.current_balance = balance
                         existing_account.currency = currency
                         existing_account.notes = notes if notes else None
+                        existing_account.account_holder_id = account_holder_id
                         
                         if self.account_service.update_account(existing_account):
                             success_count += 1
@@ -321,7 +354,8 @@ class AccountsTab(BaseEditableTable):
                             current_balance=balance,
                             currency=currency,
                             is_active=True,  # Default to active
-                            notes=notes if notes else None
+                            notes=notes if notes else None,
+                            account_holder_id=account_holder_id
                         )
                         
                         if self.account_service.create_account(account):
@@ -506,6 +540,18 @@ Account Summary
         
         except Exception as e:
             print(f"Error handling balance change event: {e}")
+    
+    def get_account_holders(self) -> List[str]:
+        """Get account holder names for dropdown."""
+        try:
+            # Initialize default account holder if none exist
+            self.account_holder_service.initialize_default_account_holder()
+            
+            # Get all account holder names
+            return self.account_holder_service.get_account_holder_names()
+        except Exception as e:
+            print(f"Error getting account holders: {e}")
+            return ["Default User"]
     
     def closeEvent(self, event):
         """Handle tab close event."""

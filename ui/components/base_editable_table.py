@@ -566,6 +566,18 @@ class BaseEditableTable(QWidget):
             pass
         return ["Food", "Transportation", "Entertainment", "Other"]
     
+    def get_account_holders(self) -> List[str]:
+        """Get account holder names for dropdowns. Override in subclasses if needed."""
+        try:
+            df = self.sheets_service.get_data_as_dataframe(self.spreadsheet_id, "'Account Holders'!A:B")
+            if not df.empty and len(df.columns) > 1:
+                # Get account holder names from the second column (Name column)
+                holder_names = df.iloc[:, 1].dropna().astype(str).tolist()
+                return [name for name in holder_names if name.strip()]
+        except:
+            pass
+        return ["Default User"]
+    
     def update_button_visibility(self):
         """Update visibility of action buttons based on state."""
         has_changes = len(self.pending_changes_rows) > 0

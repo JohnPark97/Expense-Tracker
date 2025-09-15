@@ -281,8 +281,8 @@ class CachedGoogleSheetsService:
             if cached_data:
                 accounts = []
                 for row in cached_data.get("rows", []):
-                    if len(row) >= 1 and row[0]:  # Has account name
-                        accounts.append(row[0])
+                    if len(row) >= 2 and row[1]:  # Has account name (column B)
+                        accounts.append(row[1])
                 
                 if accounts:
                     print(f"📂 Using cached accounts: {accounts}")
@@ -292,12 +292,14 @@ class CachedGoogleSheetsService:
         print("🌐 Fetching accounts from API...")
         try:
             df = self.get_data_as_dataframe(spreadsheet_id, "'Accounts'!A:H", use_cache)
-            if not df.empty and len(df.columns) > 0:
-                # Get account names from the first column or 'Name' column
+            if not df.empty and len(df.columns) > 1:
+                # Get account names from the 'Name' column (column B, index 1)
                 if 'Name' in df.columns:
                     account_names = df['Name'].dropna().astype(str).tolist()
+                elif len(df.columns) > 1:
+                    account_names = df.iloc[:, 1].dropna().astype(str).tolist()  # Column B
                 else:
-                    account_names = df.iloc[:, 0].dropna().astype(str).tolist()
+                    account_names = df.iloc[:, 0].dropna().astype(str).tolist()  # Fallback to column A
                 
                 # Filter out empty values
                 accounts = [name for name in account_names if name.strip()]
@@ -306,6 +308,36 @@ class CachedGoogleSheetsService:
             print(f"Error fetching accounts: {e}")
         
         return []
+    
+    def create_sheet(self, spreadsheet_id: str, sheet_name: str, 
+                    headers: Optional[List[str]] = None) -> bool:
+        """Create a new sheet and update cache.
+        
+        Args:
+            spreadsheet_id: The spreadsheet ID.
+            sheet_name: Name of the new sheet.
+            headers: Optional headers to add.
+            
+        Returns:
+            True if successful, False otherwise.
+        """
+        try:
+            # Delegate to the underlying sheets service
+            success = self.sheets_service.create_sheet(spreadsheet_id, sheet_name, headers)
+            
+            if success:
+                print(f"✅ Created sheet '{sheet_name}' successfully")
+                # Clear sheet names cache to force refresh
+                self.cache_service.delete_sheet_data("sheet_names")
+                # Initialize the new sheet in cache
+                if headers:
+                    self.cache_service.cache_sheet_data(sheet_name.lower().replace(' ', '-'), headers, [])
+            
+            return success
+            
+        except Exception as e:
+            print(f"Error creating sheet '{sheet_name}': {e}")
+            return False
     
     def get_sheet_names(self, spreadsheet_id: str, use_cache: bool = True) -> List[str]:
         """Get sheet names, optionally from cache.

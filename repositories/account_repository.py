@@ -46,19 +46,20 @@ class AccountRepository:
                 if success:
                     # Add headers
                     headers = [
-                        "ID",
+                        "ID", 
                         "Name", 
                         "Account Type",
                         "Current Balance",
                         "Currency",
                         "Created At",
                         "Updated At",
-                        "Notes"
+                        "Notes",
+                        "Account Holder ID"
                     ]
                     
                     # Write headers
                     batch_updates = [{
-                        'range': 'A1:H1',
+                        'range': 'A1:I1',
                         'values': [headers]
                     }]
                     self.sheets_service.batch_update_sheet_data(
@@ -90,7 +91,7 @@ class AccountRepository:
         """
         try:
             # Get data from sheet
-            range_name = f"'{self.sheet_name}'!A:H"
+            range_name = f"'{self.sheet_name}'!A:I"
             df = self.sheets_service.get_data_as_dataframe(
                 self.spreadsheet_id, range_name, use_cache=True
             )
@@ -116,7 +117,8 @@ class AccountRepository:
                         'is_active': True,  # Default to active
                         'created_at': str(row.get('Created At', '')),
                         'updated_at': str(row.get('Updated At', '')),
-                        'notes': str(row['Notes']) if pd.notna(row.get('Notes')) else None
+                        'notes': str(row['Notes']) if pd.notna(row.get('Notes')) else None,
+                        'account_holder_id': str(row['Account Holder ID']) if pd.notna(row.get('Account Holder ID')) else None
                     }
                     
                     account = Account.from_dict(account_data)
@@ -170,19 +172,20 @@ class AccountRepository:
                 account.currency.value,
                 account.created_at.isoformat() if account.created_at else '',
                 account.updated_at.isoformat() if account.updated_at else '',
-                account.notes or ''
+                account.notes or '',
+                account.account_holder_id or ''
             ]
             
             # Get current data to find next row
             df = self.sheets_service.get_data_as_dataframe(
-                self.spreadsheet_id, f"'{self.sheet_name}'!A:H", use_cache=True
+                self.spreadsheet_id, f"'{self.sheet_name}'!A:I", use_cache=True
             )
             
             next_row = len(df) + 2  # +1 for header, +1 for 1-based indexing
             
             # Write data
             batch_updates = [{
-                'range': f'A{next_row}:H{next_row}',
+                'range': f'A{next_row}:I{next_row}',
                 'values': [row_data]
             }]
             success = self.sheets_service.batch_update_sheet_data(
@@ -214,7 +217,7 @@ class AccountRepository:
         try:
             # Get current data
             df = self.sheets_service.get_data_as_dataframe(
-                self.spreadsheet_id, f"'{self.sheet_name}'!A:H", use_cache=True
+                self.spreadsheet_id, f"'{self.sheet_name}'!A:I", use_cache=True
             )
             
             if df.empty:
@@ -244,11 +247,12 @@ class AccountRepository:
                 account.currency.value,
                 account.created_at.isoformat() if account.created_at else '',
                 account.updated_at.isoformat(),
-                account.notes or ''
+                account.notes or '',
+                account.account_holder_id or ''
             ]
             
             batch_updates = [{
-                'range': f'A{row_index}:H{row_index}',
+                'range': f'A{row_index}:I{row_index}',
                 'values': [row_data]
             }]
             success = self.sheets_service.batch_update_sheet_data(
