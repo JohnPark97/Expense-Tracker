@@ -79,3 +79,5 @@ temp/
 *.dmg
 *.exe
 *.msi
+
+*.json
