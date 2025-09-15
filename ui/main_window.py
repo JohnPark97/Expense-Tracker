@@ -175,8 +175,8 @@ Instructions:
         self.accounts_tab = AccountsTab(self.sheets_service, self.spreadsheet_id)
         
         self.tabs_widget.addTab(self.overview_tab, "📊 Overview")
-        self.tabs_widget.addTab(self.accounts_tab, "🏦 Accounts")
         self.tabs_widget.addTab(self.monthly_tab, "📅 Monthly Data")
+        self.tabs_widget.addTab(self.accounts_tab, "🏦 Accounts")
         self.tabs_widget.addTab(self.categories_tab, "🏷️ Categories")
         
         # Set default tab
@@ -431,7 +431,7 @@ Features:
 • Real-time synchronization with Google Sheets
 • Intelligent caching for improved performance  
 • Multiple sheet management
-• Payment method tracking
+• Account management and tracking
 • Batch operations and conflict resolution
 
 Cache Status: {'Initialized' if self.cache_initialized else 'Not initialized'}

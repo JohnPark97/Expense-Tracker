@@ -163,6 +163,34 @@ class CategoriesTab(BaseEditableTable):
         except Exception as e:
             self.status_label.setText(f"❌ Error loading categories: {e}")
     
+    def populate_table_with_data(self, df: pd.DataFrame):
+        """Populate table with categories data."""
+        # Temporarily disconnect signals
+        self.data_table.itemChanged.disconnect()
+        
+        self.server_row_count = len(df)
+        self.data_table.setRowCount(len(df))
+        
+        for row in range(len(df)):
+            for col in range(min(len(df.columns), len(self.columns_config))):
+                value = str(df.iloc[row, col]) if pd.notna(df.iloc[row, col]) else ""
+                component = self.create_cell_component(row, col, value)
+                
+                if hasattr(component, 'currentText'):
+                    self.data_table.setCellWidget(row, col, component)
+                else:
+                    self.data_table.setItem(row, col, component)
+        
+        # Reset state
+        self.store_original_values()
+        self.pending_changes_rows.clear()
+        self.changed_cells.clear()
+        self.clear_all_highlighting()
+        self.update_confirm_button_visibility()
+        
+        # Reconnect signals
+        self.data_table.itemChanged.connect(self.on_table_item_changed)
+    
     def save_changes_to_server(self) -> bool:
         """Save changes to server."""
         try:

@@ -20,7 +20,7 @@ class MonthlySpending:
     total_amount: float
     expense_count: int
     categories: Dict[str, float]  # category -> amount
-    payment_methods: Dict[str, float]  # payment_method -> amount
+    accounts: Dict[str, float]  # account -> amount
     daily_amounts: Dict[str, float]  # date -> amount
     avg_per_day: float
     top_expense: Optional[Dict[str, Any]]  # largest single expense
@@ -133,7 +133,7 @@ class AnalyticsService:
             if spending_data and spending_data.total_amount > 0:
                 print(f"  ✅ Found data: ${spending_data.total_amount:.2f} total, {spending_data.expense_count} expenses")
                 print(f"  📋 Categories: {list(spending_data.categories.keys())}")
-                print(f"  💳 Payment methods: {list(spending_data.payment_methods.keys())}")
+                print(f"  🏦 Accounts: {list(spending_data.accounts.keys())}")
                 results.append(spending_data)
             else:
                 print(f"  ❌ No spending data found for {month_name}")
@@ -228,7 +228,7 @@ class AnalyticsService:
         print(f"📋 Updated columns: {list(df.columns)}")
         
         # Standard column mapping (flexible based on actual column count)
-        standard_names = ['Date', 'Description', 'Amount', 'Category', 'Payment Method', 'Notes']
+        standard_names = ['Date', 'Description', 'Amount', 'Category', 'Account', 'Notes']
         
         # Create mapping only for columns that exist
         col_mapping = {}
@@ -267,10 +267,10 @@ class AnalyticsService:
         else:
             df['Category'] = df['Category'].fillna('Uncategorized')
         
-        if 'Payment Method' not in df.columns:
-            df['Payment Method'] = 'Unknown'
+        if 'Account' not in df.columns:
+            df['Account'] = 'Unknown'
         else:
-            df['Payment Method'] = df['Payment Method'].fillna('Unknown')
+            df['Account'] = df['Account'].fillna('Unknown')
         
         if 'Notes' not in df.columns:
             df['Notes'] = ''
@@ -286,7 +286,7 @@ class AnalyticsService:
         if len(df) > 0:
             print(f"📊 Sample data (first 3 rows):")
             for i, (_, row) in enumerate(df.head(3).iterrows()):
-                print(f"  Row {i+1}: Date='{row['Date']}', Desc='{row['Description']}', Amount=${row['Amount']}, Cat='{row['Category']}', Payment='{row['Payment Method']}'")
+                print(f"  Row {i+1}: Date='{row['Date']}', Desc='{row['Description']}', Amount=${row['Amount']}, Cat='{row['Category']}', Account='{row['Account']}'")
         else:
             print("❌ No valid expense records found after cleaning")
         
@@ -310,11 +310,11 @@ class AnalyticsService:
         categories = {k: float(v) for k, v in categories.items()}
         print(f"📊 Categories breakdown: {categories}")
         
-        # Payment method breakdown
-        print(f"📈 Grouping by Payment Method...")
-        payment_methods = df.groupby('Payment Method')['Amount'].sum().to_dict()
-        payment_methods = {k: float(v) for k, v in payment_methods.items()}
-        print(f"💳 Payment methods breakdown: {payment_methods}")
+        # Account breakdown
+        print(f"📈 Grouping by Account...")
+        accounts = df.groupby('Account')['Amount'].sum().to_dict()
+        accounts = {k: float(v) for k, v in accounts.items()}
+        print(f"🏦 Accounts breakdown: {accounts}")
         
         # Daily amounts (if date parsing works)
         daily_amounts = {}
@@ -349,7 +349,7 @@ class AnalyticsService:
             total_amount=total_amount,
             expense_count=expense_count,
             categories=categories,
-            payment_methods=payment_methods,
+            accounts=accounts,
             daily_amounts=daily_amounts,
             avg_per_day=avg_per_day,
             top_expense=top_expense
@@ -365,7 +365,7 @@ class AnalyticsService:
             total_amount=0.0,
             expense_count=0,
             categories={},
-            payment_methods={},
+            accounts={},
             daily_amounts={},
             avg_per_day=0.0,
             top_expense=None

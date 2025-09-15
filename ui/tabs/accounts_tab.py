@@ -98,11 +98,44 @@ class AccountsTab(BaseEditableTable):
             add_button_text="➕ Add Account"
         )
         
+        # Initialize default accounts if none exist
+        self._initialize_accounts()
+        
         # Add custom account management buttons
         self._add_account_management_buttons()
-        
-        # Force clear cache on first load if needed (for clean start)
-        self._clear_cached_accounts_if_requested()
+    
+    def load_data(self):
+        """Load account data from service and populate table."""
+        try:
+            print("🔄 Loading accounts data...")
+            self.status_label.setText("🔄 Loading accounts...")
+            
+            # Get data from service
+            df = self.get_data_from_service()
+            
+            if df.empty:
+                print("📝 No accounts found, showing empty table")
+                self.status_label.setText("📝 No accounts found")
+                self.data_table.setRowCount(0)
+                return
+            
+            # Populate table with data
+            self.populate_table_with_data(df)
+            
+            print(f"✅ Loaded {len(df)} accounts successfully")
+            self.status_label.setText(f"✅ Loaded {len(df)} accounts")
+            
+        except Exception as e:
+            print(f"❌ Error loading accounts data: {e}")
+            self.status_label.setText(f"❌ Error loading data: {e}")
+            self.data_table.setRowCount(0)
+    
+    def _initialize_accounts(self):
+        """Initialize default accounts if none exist."""
+        try:
+            self.account_service.initialize_default_accounts()
+        except Exception as e:
+            print(f"Error initializing accounts: {e}")
     
     def _add_account_management_buttons(self):
         """Add custom buttons for account management."""
@@ -125,15 +158,9 @@ class AccountsTab(BaseEditableTable):
             migrate_btn.clicked.connect(self._show_migration_dialog)
             migrate_btn.setToolTip("Convert existing payment methods to accounts")
             
-            # Clear all button
-            clear_btn = QPushButton("🗑️ Clear All Accounts")
-            clear_btn.clicked.connect(self._show_clear_accounts_dialog)
-            clear_btn.setToolTip("Remove all accounts from the sheet")
-            
             button_layout.addWidget(adjust_balance_btn)
             button_layout.addWidget(summary_btn)
             button_layout.addWidget(migrate_btn)
-            button_layout.addWidget(clear_btn)
             button_layout.addStretch()
             
             # Add to main layout
@@ -179,130 +206,173 @@ class AccountsTab(BaseEditableTable):
             QMessageBox.warning(self, "Invalid Balance", "Please enter a valid number for the balance.")
             return False
     
-    def load_data(self):
-        """Load account data directly from the Google Sheets 'Accounts' sheet."""
+    def get_data_from_service(self) -> pd.DataFrame:
+        """Get account data from account service instead of sheets directly.
+        
+        Returns:
+            DataFrame with account data.
+        """
         try:
-            self.status_label.setText("📂 Loading accounts from sheet...")
+            # Get accounts from service
+            accounts = self.account_service.get_all_accounts(include_inactive=True)
             
-            # Get data directly from Google Sheets using cached service
-            range_name = f"'{self.sheet_name}'!A:H"  # All columns in Accounts sheet
-            df = self.sheets_service.get_data_as_dataframe(
-                self.spreadsheet_id, range_name, use_cache=True
-            )
+            if not accounts:
+                # Return empty DataFrame with proper columns
+                columns = [config.header for config in self.columns_config]
+                return pd.DataFrame(columns=columns)
             
-            if df.empty:
-                # Empty sheet - show empty table
-                self.data_table.setRowCount(0)
-                self.server_row_count = 0
-                self.status_label.setText("📝 No accounts in sheet - add some!")
-                return
-            
-            # Convert sheet data to match our UI columns
-            ui_data = []
-            for _, row in df.iterrows():
-                # Skip empty rows
-                if pd.isna(row.get('Name', '')) or row.get('Name', '').strip() == '':
-                    continue
-                    
-                ui_row = [
-                    str(row.get('Name', '')),
-                    str(row.get('Account Type', 'Other Account')),
-                    str(row.get('Current Balance', '0.00')),
-                    str(row.get('Currency', 'CAD')),
-                    str(row.get('Notes', ''))
+            # Convert accounts to DataFrame rows
+            rows = []
+            for account in accounts:
+                row = [
+                    account.name,
+                    get_account_type_display_name(account.account_type),
+                    f"{account.current_balance:.2f}",
+                    account.currency.value,
+                    account.notes or ""
                 ]
-                ui_data.append(ui_row)
+                rows.append(row)
             
-            # Create DataFrame with UI column names
+            # Create DataFrame
             columns = [config.header for config in self.columns_config]
-            ui_df = pd.DataFrame(ui_data, columns=columns)
+            df = pd.DataFrame(rows, columns=columns)
             
-            if ui_df.empty:
-                self.data_table.setRowCount(0)
-                self.server_row_count = 0
-                self.status_label.setText("📝 No valid accounts in sheet - add some!")
-                return
-            
-            # Populate table with data using base implementation
-            self.populate_table_with_data(ui_df)
-            
-            # Show status with cache indicator
-            cache_indicator = "🏠" if self.sheets_service.cache_service.is_sheet_cached(self.sheet_name) else "🌐"
-            self.status_label.setText(f"✅ Loaded {len(ui_df)} accounts from sheet {cache_indicator}")
+            print(f"📊 Loaded {len(df)} accounts from service")
+            return df
             
         except Exception as e:
-            self.status_label.setText(f"❌ Error loading accounts: {e}")
-            print(f"Error loading account data from sheet: {e}")
-            # Show empty table on error
-            self.data_table.setRowCount(0)
-            self.server_row_count = 0
+            print(f"Error getting account data from service: {e}")
+            # Fallback to parent method
+            return super().get_data_from_service()
+    
+    def save_data_to_service(self, data: List[List[str]]) -> bool:
+        """Save account data using account service.
+        
+        Args:
+            data: List of row data to save.
+            
+        Returns:
+            True if successful, False otherwise.
+        """
+        try:
+            print(f"💾 Saving {len(data)} accounts using account service...")
+            
+            # Get existing accounts for comparison
+            existing_accounts = {acc.id: acc for acc in self.account_service.get_all_accounts(include_inactive=True)}
+            existing_by_name = {acc.name: acc for acc in existing_accounts.values()}
+            
+            success_count = 0
+            
+            for i, row in enumerate(data):
+                try:
+                    # Skip empty rows
+                    if not row or not any(cell.strip() for cell in row if cell):
+                        continue
+                    
+                    # Parse row data
+                    account_name = row[0].strip() if len(row) > 0 else ""
+                    account_type_display = row[1].strip() if len(row) > 1 else ""
+                    balance_str = row[2].strip() if len(row) > 2 else "0.00"
+                    currency_str = row[3].strip() if len(row) > 3 else "CAD"
+                    notes = row[4].strip() if len(row) > 4 else ""
+                    
+                    if not account_name:
+                        continue
+                    
+                    # Convert display names back to enum values
+                    account_type = None
+                    for at in AccountType:
+                        if get_account_type_display_name(at) == account_type_display:
+                            account_type = at
+                            break
+                    
+                    if not account_type:
+                        account_type = AccountType.OTHER
+                    
+                    # Parse balance
+                    balance = float(balance_str.replace('$', '').replace(',', ''))
+                    
+                    # Parse currency
+                    currency = Currency.CAD
+                    try:
+                        currency = Currency(currency_str)
+                    except ValueError:
+                        pass
+                    
+                    # Check if this is an update or create
+                    existing_account = existing_by_name.get(account_name)
+                    
+                    if existing_account:
+                        # Update existing account
+                        existing_account.name = account_name
+                        existing_account.account_type = account_type
+                        existing_account.current_balance = balance
+                        existing_account.currency = currency
+                        existing_account.notes = notes if notes else None
+                        
+                        if self.account_service.update_account(existing_account):
+                            success_count += 1
+                    else:
+                        # Create new account
+                        account = Account(
+                            id=f"acc_{account_name.lower().replace(' ', '_')}_{int(datetime.now().timestamp())}",
+                            name=account_name,
+                            account_type=account_type,
+                            current_balance=balance,
+                            currency=currency,
+                            is_active=True,  # Default to active
+                            notes=notes if notes else None
+                        )
+                        
+                        if self.account_service.create_account(account):
+                            success_count += 1
+                
+                except Exception as e:
+                    print(f"Error processing account row {i}: {e}")
+                    continue
+            
+            print(f"✅ Successfully saved {success_count}/{len(data)} accounts")
+            return success_count > 0
+            
+        except Exception as e:
+            print(f"Error saving accounts using service: {e}")
+            # Fallback to parent method
+            return super().save_data_to_service(data)
     
     def save_changes_to_server(self) -> bool:
-        """Save all pending changes directly to the Google Sheets 'Accounts' sheet."""
+        """Save all pending changes to the server using account service."""
         try:
-            print(f"💾 Saving {len(self.pending_changes_rows)} account changes to sheet...")
+            print(f"💾 Saving {len(self.pending_changes_rows)} account changes...")
             
-            # Get all current data from table
-            all_data = []
-            for row in range(self.data_table.rowCount()):
+            # Collect all changed row data
+            changed_data = []
+            for row in self.pending_changes_rows:
                 row_data = []
                 for col in range(len(self.columns_config)):
                     value = self.get_cell_value(row, col).strip()
                     row_data.append(value)
                 
-                # Only include rows with data
+                # Skip empty rows
                 if any(cell for cell in row_data if cell):
-                    all_data.append(row_data)
+                    changed_data.append(row_data)
             
-            if not all_data:
+            if not changed_data:
                 print("No valid data to save")
                 return True
             
-            # Convert UI data back to sheet format
-            sheet_data = []
-            for ui_row in all_data:
-                # Map UI columns to sheet columns
-                sheet_row = [
-                    ui_row[0],  # Account Name -> Name
-                    ui_row[1],  # Account Type -> Account Type  
-                    ui_row[2],  # Current Balance -> Current Balance
-                    ui_row[3],  # Currency -> Currency
-                    ui_row[4],  # Notes -> Notes
-                    "",         # ID (will be auto-generated if new)
-                    "",         # Created At
-                    ""          # Updated At
-                ]
-                sheet_data.append(sheet_row)
-            
-            # Prepare sheet headers
-            sheet_headers = ["Name", "Account Type", "Current Balance", "Currency", "Notes", "ID", "Created At", "Updated At"]
-            
-            # Create batch update
-            batch_updates = [{
-                'range': f"'{self.sheet_name}'!A1:H{len(sheet_data)+1}",
-                'values': [sheet_headers] + sheet_data
-            }]
-            
-            # Save to sheet
-            success = self.sheets_service.batch_update_sheet_data(
-                self.spreadsheet_id, batch_updates
-            )
+            # Use the existing save_data_to_service method
+            success = self.save_data_to_service(changed_data)
             
             if success:
-                # Clear pending changes and refresh
+                # Clear pending changes and refresh the table
                 self.pending_changes_rows.clear()
                 self.clear_all_highlighting()
-                print(f"✅ Successfully saved {len(sheet_data)} accounts to sheet")
-                
-                # Refresh data from sheet
-                self.load_data()
-            else:
-                print("❌ Failed to save accounts to sheet")
+                self.load_data()  # Refresh data from service
             
             return success
             
         except Exception as e:
-            print(f"Error saving accounts to sheet: {e}")
+            print(f"Error in save_changes_to_server: {e}")
             return False
     
     def _show_balance_adjustment_dialog(self):
@@ -416,115 +486,6 @@ Account Summary
         
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to migrate payment methods: {e}")
-    
-    def _show_clear_accounts_dialog(self):
-        """Show dialog to clear all accounts from the sheet."""
-        try:
-            # Show confirmation dialog
-            reply = QMessageBox.question(
-                self,
-                "Clear All Accounts",
-                "⚠️ WARNING: This will permanently delete ALL accounts from the Google Sheets.\n\n" +
-                "This action cannot be undone!\n\n" +
-                "Are you sure you want to proceed?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No  # Default to No for safety
-            )
-            
-            if reply == QMessageBox.Yes:
-                # Show additional confirmation
-                final_reply = QMessageBox.question(
-                    self,
-                    "Final Confirmation",
-                    "🚨 FINAL WARNING: You are about to delete ALL account data!\n\n" +
-                    "Click YES only if you are absolutely certain.",
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No
-                )
-                
-                if final_reply == QMessageBox.Yes:
-                    success = self._clear_accounts_from_sheet()
-                    
-                    if success:
-                        QMessageBox.information(
-                            self,
-                            "Accounts Cleared",
-                            "✅ All accounts have been removed from the sheet.\n\nThe table will now refresh."
-                        )
-                        # Refresh data to show empty sheet
-                        self.load_data()
-                    else:
-                        QMessageBox.warning(self, "Clear Failed", "❌ Failed to clear accounts from sheet.")
-        
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to clear accounts: {e}")
-    
-    def _clear_accounts_from_sheet(self) -> bool:
-        """Clear all accounts from the Google Sheets 'Accounts' sheet.
-        
-        Returns:
-            True if successful, False otherwise.
-        """
-        try:
-            print("🗑️ Clearing all accounts from sheet...")
-            
-            # Just write headers only (no data rows)
-            sheet_headers = ["Name", "Account Type", "Current Balance", "Currency", "Notes", "ID", "Created At", "Updated At"]
-            
-            # Create batch update with only headers
-            batch_updates = [{
-                'range': f"'{self.sheet_name}'!A1:H1",
-                'values': [sheet_headers]
-            }]
-            
-            # Clear the sheet by writing only headers
-            success = self.sheets_service.batch_update_sheet_data(
-                self.spreadsheet_id, batch_updates
-            )
-            
-            if success:
-                print("✅ Successfully cleared all accounts from sheet")
-                
-                # Clear the cache for this sheet to force refresh
-                if hasattr(self.sheets_service, 'cache_service'):
-                    cache_service = self.sheets_service.cache_service
-                    if hasattr(cache_service, '_cache') and 'data' in cache_service._cache:
-                        sheet_key = self.sheet_name.lower().replace(' ', '-')
-                        if sheet_key in cache_service._cache['data']:
-                            # Clear the cached data
-                            cache_service._cache['data'][sheet_key]['rows'] = []
-                            cache_service._cache['data'][sheet_key]['row_count'] = 0
-                            cache_service._save_cache()
-                            print(f"🧹 Cleared cache for '{self.sheet_name}' sheet")
-            else:
-                print("❌ Failed to clear accounts from sheet")
-            
-            return success
-            
-        except Exception as e:
-            print(f"Error clearing accounts from sheet: {e}")
-            return False
-    
-    def _clear_cached_accounts_if_requested(self):
-        """Clear cached accounts data to force fresh load from server.
-        
-        Call this method to immediately clear any cached default accounts
-        and force the UI to show only what's actually in the Google Sheet.
-        """
-        try:
-            # Clear the cache for Accounts sheet
-            if hasattr(self.sheets_service, 'cache_service'):
-                cache_service = self.sheets_service.cache_service
-                if hasattr(cache_service, '_cache') and 'data' in cache_service._cache:
-                    sheet_key = "accounts"  # Cache key for Accounts sheet
-                    if sheet_key in cache_service._cache['data']:
-                        print(f"🧹 Clearing cached data for '{self.sheet_name}' sheet to force fresh load...")
-                        # Remove this sheet from cache entirely
-                        del cache_service._cache['data'][sheet_key]
-                        cache_service._save_cache()
-                        print(f"✅ Cleared cache for '{self.sheet_name}' - will fetch fresh data from server")
-        except Exception as e:
-            print(f"Error clearing cached accounts: {e}")
     
     def _on_balance_change(self, event: BalanceChangeEvent):
         """Handle balance change events.

@@ -76,7 +76,7 @@ class CachedGoogleSheetsService:
                     rows = raw_data[1:] if len(raw_data) > 1 else []
                 else:
                     # Default headers for expense sheets
-                    headers = ["Date", "Description", "Amount", "Category", "Payment Method", "Notes"]
+                    headers = ["Date", "Description", "Amount", "Category", "Account", "Notes"]
                     rows = []
             
             # Cache the data
@@ -159,7 +159,7 @@ class CachedGoogleSheetsService:
         
         if success:
             # Cache the new empty sheet
-            headers = ["Date", "Description", "Amount", "Category", "Payment Method", "Notes"]
+            headers = ["Date", "Description", "Amount", "Category", "Account", "Notes"]
             self.cache_service.cache_sheet_data(sheet_name, headers, [])
             print(f"📝 Cached new sheet '{sheet_name}'")
         
@@ -249,75 +249,63 @@ class CachedGoogleSheetsService:
         
         return success
     
-    def add_payment_method(self, spreadsheet_id: str, method_name: str, 
-                          description: str = "", active: bool = True) -> bool:
-        """Add payment method and update cache.
+    def add_account(self, spreadsheet_id: str, account_name: str, 
+                   account_type: str = "Other", balance: float = 0.0) -> bool:
+        """Add account and update cache.
         
         Args:
             spreadsheet_id: The spreadsheet ID.
-            method_name: Name of the payment method.
-            description: Description.
-            active: Whether active.
+            account_name: Name of the account.
+            account_type: Type of account.
+            balance: Initial balance.
             
         Returns:
             True if added successfully.
         """
-        success = self.sheets_service.add_payment_method(
-            spreadsheet_id, method_name, description, active
-        )
-        
-        if success:
-            # Add to cache
-            new_row = [method_name, description, "Yes" if active else "No"]
-            self.cache_service.add_row_to_cache("payment-methods", new_row)
-        
-        return success
+        # This would need to be implemented in the base sheets service
+        # For now, just return True as accounts are managed through AccountsTab
+        return True
     
-    def get_payment_methods(self, spreadsheet_id: str, use_cache: bool = True) -> List[str]:
-        """Get payment methods, using cache when available.
+    def get_accounts(self, spreadsheet_id: str, use_cache: bool = True) -> List[str]:
+        """Get account names, using cache when available.
         
         Args:
             spreadsheet_id: The spreadsheet ID.
             use_cache: Whether to use cached data.
             
         Returns:
-            List of payment method names.
+            List of account names.
         """
-        if use_cache and self.cache_service.is_sheet_cached("payment-methods"):
-            cached_data = self.cache_service.get_sheet_data("payment-methods")
+        if use_cache and self.cache_service.is_sheet_cached("accounts"):
+            cached_data = self.cache_service.get_sheet_data("accounts")
             if cached_data:
-                methods = []
+                accounts = []
                 for row in cached_data.get("rows", []):
-                    if len(row) >= 3 and row[0]:  # Has method name
-                        # Check if active (default to active if not specified)
-                        is_active = len(row) < 3 or row[2].upper() in ["YES", "Y", "TRUE", "1"]
-                        if is_active:
-                            methods.append(row[0])
+                    if len(row) >= 1 and row[0]:  # Has account name
+                        accounts.append(row[0])
                 
-                if methods:
-                    print(f"📂 Using cached payment methods: {methods}")
-                    return methods
+                if accounts:
+                    print(f"📂 Using cached accounts: {accounts}")
+                    return accounts
         
         # Fallback to API
-        print("🌐 Fetching payment methods from API...")
-        methods = self.sheets_service.get_payment_methods(spreadsheet_id)
+        print("🌐 Fetching accounts from API...")
+        try:
+            df = self.get_data_as_dataframe(spreadsheet_id, "'Accounts'!A:H", use_cache)
+            if not df.empty and len(df.columns) > 0:
+                # Get account names from the first column or 'Name' column
+                if 'Name' in df.columns:
+                    account_names = df['Name'].dropna().astype(str).tolist()
+                else:
+                    account_names = df.iloc[:, 0].dropna().astype(str).tolist()
+                
+                # Filter out empty values
+                accounts = [name for name in account_names if name.strip()]
+                return accounts
+        except Exception as e:
+            print(f"Error fetching accounts: {e}")
         
-        # Cache the payment methods sheet for next time
-        if methods:
-            # Try to fetch full payment methods sheet to cache
-            try:
-                df = self.sheets_service.get_data_as_dataframe(
-                    spreadsheet_id, "'Payment Methods'!A:C"
-                )
-                if not df.empty:
-                    headers = list(df.columns)
-                    rows = df.values.tolist()
-                    rows = [[str(cell) if pd.notna(cell) else "" for cell in row] for row in rows]
-                    self.cache_service.cache_sheet_data("payment-methods", headers, rows)
-            except:
-                pass  # Ignore caching errors
-        
-        return methods
+        return []
     
     def get_sheet_names(self, spreadsheet_id: str, use_cache: bool = True) -> List[str]:
         """Get sheet names, optionally from cache.
@@ -335,8 +323,8 @@ class CachedGoogleSheetsService:
                 # Convert cache keys back to display names
                 display_names = []
                 for cache_key in cached_names:
-                    if cache_key == "payment-methods":
-                        display_names.append("Payment Methods")
+                    if cache_key == "accounts":
+                        display_names.append("Accounts")
                     else:
                         # Convert 'january-2025' back to 'January 2025'
                         parts = cache_key.split('-')

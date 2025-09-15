@@ -467,86 +467,122 @@ class BaseEditableTable(QWidget):
     def load_data(self):
         """Load data from the sheet."""
         # This method should be implemented by subclasses
-        # or use a generic implementation
-        pass
-    
-    def populate_table_with_data(self, df: pd.DataFrame):
-        """Populate table with data from DataFrame.
-        
-        This is a generic implementation that works for most cases.
-        Subclasses can override if they need custom behavior.
-        
-        Args:
-            df: DataFrame containing the data to populate.
-        """
-        # Temporarily disconnect signals to avoid triggering change events
-        self.data_table.itemChanged.disconnect()
-        
-        # Set row count and track server data
-        self.server_row_count = len(df)
-        self.data_table.setRowCount(len(df))
-        
-        # Populate each cell
-        for row in range(len(df)):
-            for col in range(min(len(df.columns), len(self.columns_config))):
-                value = str(df.iloc[row, col]) if pd.notna(df.iloc[row, col]) else ""
-                component = self.create_cell_component(row, col, value)
-                
-                # Set widget or item depending on component type
-                if hasattr(component, 'currentText'):
-                    # It's a widget (like QComboBox)
-                    self.data_table.setCellWidget(row, col, component)
-                else:
-                    # It's a table item
-                    self.data_table.setItem(row, col, component)
-        
-        # Reset change tracking state
-        self.store_original_values()
-        self.pending_changes_rows.clear()
-        self.changed_cells.clear()
-        self.clear_all_highlighting()
-        self.update_confirm_button_visibility()
-        
-        # Reconnect signals
-        self.data_table.itemChanged.connect(self.on_table_item_changed)
+        # For now, try a generic implementation
+        try:
+            print(f"🔄 Loading data for {self.sheet_name}...")
+            df = self.get_data_from_service()
+            if not df.empty:
+                self.populate_table_with_data(df)
+                print(f"✅ Loaded {len(df)} rows")
+            else:
+                print("📝 No data found")
+                self.data_table.setRowCount(0)
+        except Exception as e:
+            print(f"❌ Error in generic load_data: {e}")
+            # Subclasses should implement their own load_data method
     
     def refresh_data(self):
         """Refresh data from the server."""
         self.status_label.setText("🔄 Refreshing data...")
         self.load_data()
     
-    # ... (continuing in next part due to length)
-    
-    def get_payment_methods(self) -> List[str]:
-        """Get payment methods for dropdowns. Override in subclasses if needed."""
+    def populate_table_with_data(self, df):
+        """Populate table with DataFrame data."""
         try:
-            return self.sheets_service.get_payment_methods(self.spreadsheet_id)
-        except:
-            return ["Cash", "Credit Card", "Debit Card"]
-    
-    def get_accounts(self) -> List[str]:
-        """Get account names for dropdowns."""
-        try:
-            df = self.sheets_service.get_data_as_dataframe(
-                self.spreadsheet_id, "'Accounts'!A:H", use_cache=True
-            )
-            if df.empty:
-                return ["Cash"]
+            print(f"🔄 Populating table with {len(df)} rows...")
             
-            # Get account names from column B (index 1) - the Name column
-            if len(df.columns) > 1:
-                account_names = df.iloc[:, 1].tolist()  # Second column (Name)
-            else:
-                account_names = df.iloc[:, 0].tolist()  # First column as fallback
-                
-            # Filter out empty/null values and return as strings
-            import pandas as pd
-            valid_accounts = [str(acc) for acc in account_names if pd.notna(acc) and str(acc).strip()]
-            return valid_accounts if valid_accounts else ["Cash"]
+            # Clear pending changes when loading fresh data
+            self.pending_changes_rows.clear()
+            self.changed_cells.clear()
+            
+            # Set table size
+            self.data_table.setRowCount(len(df))
+            
+            # Get dynamic options for dropdowns
+            categories = self.get_categories() if hasattr(self, 'get_categories') else []
+            accounts = self.get_accounts() if hasattr(self, 'get_accounts') else []
+            
+            # Populate rows
+            for row in range(len(df)):
+                for col in range(min(len(df.columns), len(self.columns_config))):
+                    value = str(df.iloc[row, col]) if pd.notna(df.iloc[row, col]) else ""
+                    
+                    # Create component for this cell
+                    component = self.create_cell_component(row, col, value)
+                    
+                    # For dropdowns, populate options
+                    col_config = self.columns_config[col]
+                    if col_config.component_type == "dropdown" and hasattr(component, 'addItems'):
+                        # Clear and add options
+                        component.clear()
+                        
+                        # Get options from config or dynamic source
+                        if col_config.options_source == "get_categories" and categories:
+                            component.addItems(categories)
+                        elif col_config.options_source == "get_accounts" and accounts:
+                            component.addItems(accounts)
+                        elif col_config.options:
+                            component.addItems(col_config.options)
+                        
+                        # Set current value
+                        component.setCurrentText(value)
+                    
+                    # Set component in table
+                    if hasattr(component, 'currentText'):  # It's a widget
+                        self.data_table.setCellWidget(row, col, component)
+                    else:  # It's a table item
+                        self.data_table.setItem(row, col, component)
+            
+            # Clear any highlighting from previous loads
+            self.clear_all_highlighting()
+            
+            # Update button visibility
+            self.update_button_visibility()
+            
+            print(f"✅ Table populated successfully with {len(df)} rows")
             
         except Exception as e:
-            print(f"Error getting accounts: {e}")
+            print(f"❌ Error populating table: {e}")
+            raise
+    
+    # ... (continuing in next part due to length)
+    
+    def get_accounts(self) -> List[str]:
+        """Get account names for dropdowns. Override in subclasses if needed."""
+        try:
+            return self.sheets_service.get_accounts(self.spreadsheet_id)
+        except:
             return ["Cash"]
+    
+    def get_categories(self) -> List[str]:
+        """Get categories for dropdowns. Override in subclasses if needed."""
+        try:
+            df = self.sheets_service.get_data_as_dataframe(self.spreadsheet_id, "'Categories'!A:B")
+            if not df.empty and len(df.columns) > 0:
+                # Get category names from the first column
+                category_names = df.iloc[:, 0].dropna().astype(str).tolist()
+                return [name for name in category_names if name.strip()]
+        except:
+            pass
+        return ["Food", "Transportation", "Entertainment", "Other"]
+    
+    def update_button_visibility(self):
+        """Update visibility of action buttons based on state."""
+        has_changes = len(self.pending_changes_rows) > 0
+        has_selection = len(self.data_table.selectionModel().selectedRows()) > 0
+        
+        # Show confirm button if there are pending changes
+        self.confirm_button.setVisible(has_changes)
+        
+        # Show delete button if there's a selection
+        self.delete_button.setVisible(has_selection)
+        
+        # Update confirm button text to show number of changes
+        if has_changes:
+            change_count = len(self.pending_changes_rows)
+            self.confirm_button.setText(f"✅ Confirm Changes ({change_count})")
+        else:
+            self.confirm_button.setText("✅ Confirm Changes")
     
     def on_table_item_changed(self, item):
         """Handle table item changes."""
