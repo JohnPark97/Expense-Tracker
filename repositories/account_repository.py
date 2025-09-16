@@ -92,7 +92,7 @@ class AccountRepository:
             # Get data from sheet
             range_name = f"'{self.sheet_name}'!A:I"
             df = self.sheets_service.get_data_as_dataframe(
-                self.spreadsheet_id, range_name, use_cache=True
+                self.spreadsheet_id, range_name, use_cache=False
             )
             
             if df.empty:
@@ -175,7 +175,7 @@ class AccountRepository:
             
             # Get current data to find next row
             df = self.sheets_service.get_data_as_dataframe(
-                self.spreadsheet_id, f"'{self.sheet_name}'!A:H", use_cache=True
+                self.spreadsheet_id, f"'{self.sheet_name}'!A:H", use_cache=False
             )
             
             next_row = len(df) + 2  # +1 for header, +1 for 1-based indexing
@@ -214,7 +214,7 @@ class AccountRepository:
         try:
             # Get current data
             df = self.sheets_service.get_data_as_dataframe(
-                self.spreadsheet_id, f"'{self.sheet_name}'!A:I", use_cache=True
+                self.spreadsheet_id, f"'{self.sheet_name}'!A:I", use_cache=False
             )
             
             if df.empty:
@@ -437,7 +437,7 @@ class TransactionRepository:
             
             # Get current data to find next row
             df = self.sheets_service.get_data_as_dataframe(
-                self.spreadsheet_id, f"'{self.sheet_name}'!A:M", use_cache=True
+                self.spreadsheet_id, f"'{self.sheet_name}'!A:M", use_cache=False
             )
             
             next_row = len(df) + 2  # +1 for header, +1 for 1-based indexing
@@ -479,7 +479,7 @@ class TransactionRepository:
             # Get all transactions data
             range_name = f"'{self.sheet_name}'!A:M"
             df = self.sheets_service.get_data_as_dataframe(
-                self.spreadsheet_id, range_name, use_cache=True
+                self.spreadsheet_id, range_name, use_cache=False
             )
             
             if df.empty:

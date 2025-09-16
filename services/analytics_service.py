@@ -68,7 +68,7 @@ class AnalyticsService:
             # Get expense data for the month
             range_name = f"'{sheet_name}'!A:Z"
             df = self.sheets_service.get_data_as_dataframe(
-                self.spreadsheet_id, range_name, use_cache=True
+                self.spreadsheet_id, range_name, use_cache=False
             )
             
             if df.empty:

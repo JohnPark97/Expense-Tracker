@@ -301,10 +301,10 @@ class MonthlyDataTab(BaseEditableTable):
         try:
             self.status_label.setText("📂 Loading expense data...")
             
-            # Get data using cached service
+            # Get data using direct API call
             range_name = f"'{self.current_sheet_name}'!A:Z"
             df = self.sheets_service.get_data_as_dataframe(
-                self.spreadsheet_id, range_name, use_cache=True
+                self.spreadsheet_id, range_name, use_cache=False
             )
             
             if df.empty:
@@ -315,10 +315,9 @@ class MonthlyDataTab(BaseEditableTable):
             # Populate table
             self.populate_table_with_data(df)
             
-            # Show cache status
-            cache_indicator = self._get_cache_status_indicator()
+            # Show load status
             self.status_label.setText(
-                f"✅ Loaded {len(df)} expenses for {self.current_sheet_name} {cache_indicator}"
+                f"✅ Loaded {len(df)} expenses for {self.current_sheet_name}"
             )
             
         except Exception as e:
@@ -461,18 +460,6 @@ class MonthlyDataTab(BaseEditableTable):
             print(f"Error saving expenses: {e}")
             return False
     
-    def _get_cache_status_indicator(self) -> str:
-        """Get cache status indicator."""
-        try:
-            if hasattr(self.sheets_service, 'cache_service') and self.current_sheet_name:
-                sheet_key = self.current_sheet_name.lower().replace(' ', '-')
-                if self.sheets_service.cache_service.is_sheet_cached(sheet_key):
-                    return "📂"  # From cache
-                else:
-                    return "🌐"  # From server
-            return "🌐"
-        except:
-            return ""
     
     def get_categories(self) -> List[str]:
         """Get list of active categories for use in dropdowns.
@@ -484,7 +471,7 @@ class MonthlyDataTab(BaseEditableTable):
             # Get categories data from the Categories sheet
             range_name = "'Categories'!A:E"
             df = self.sheets_service.get_data_as_dataframe(
-                self.spreadsheet_id, range_name, use_cache=True
+                self.spreadsheet_id, range_name, use_cache=False
             )
             
             if df.empty:

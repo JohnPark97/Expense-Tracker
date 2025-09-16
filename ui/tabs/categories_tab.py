@@ -146,7 +146,7 @@ class CategoriesTab(BaseEditableTable):
             
             range_name = f"'{self.sheet_name}'!A:E"
             df = self.sheets_service.get_data_as_dataframe(
-                self.spreadsheet_id, range_name, use_cache=True
+                self.spreadsheet_id, range_name, use_cache=False
             )
             
             if df.empty:
@@ -157,8 +157,7 @@ class CategoriesTab(BaseEditableTable):
             
             self.populate_table_with_data(df)
             
-            cache_indicator = self._get_cache_status_indicator()
-            self.status_label.setText(f"✅ Loaded {len(df)} categories {cache_indicator}")
+            self.status_label.setText(f"✅ Loaded {len(df)} categories")
             
         except Exception as e:
             self.status_label.setText(f"❌ Error loading categories: {e}")
@@ -222,17 +221,6 @@ class CategoriesTab(BaseEditableTable):
             print(f"Error saving categories: {e}")
             return False
     
-    def _get_cache_status_indicator(self) -> str:
-        """Get cache status indicator."""
-        try:
-            if hasattr(self.sheets_service, 'cache_service'):
-                if self.sheets_service.cache_service.is_sheet_cached("categories"):
-                    return "📂"
-                else:
-                    return "🌐"
-            return "🌐"
-        except:
-            return ""
     
     def get_active_categories(self) -> List[str]:
         """Get list of active category names."""
