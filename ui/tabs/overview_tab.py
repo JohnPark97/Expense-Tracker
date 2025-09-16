@@ -16,6 +16,7 @@ from services.analytics_service import AnalyticsService
 from ui.components.visualization_container import VisualizationContainer
 from ui.components.monthly_detail_grid import MonthlyDetailGrid
 from ui.components.base_chart import ChartMode
+from ui.components import show_info, show_success, show_warning, show_error, show_loading
 
 
 class OverviewTab(QWidget):
@@ -103,11 +104,6 @@ class OverviewTab(QWidget):
         header_layout.addWidget(self.refresh_button)
         
         layout.addWidget(header_widget)
-        
-        # Subtitle/status
-        self.status_label = QLabel("Loading analytics...")
-        self.status_label.setStyleSheet("color: #666; font-style: italic; margin-bottom: 10px;")
-        layout.addWidget(self.status_label)
     
     def show_placeholder(self):
         """Show placeholder when services are not available."""
@@ -137,7 +133,7 @@ class OverviewTab(QWidget):
         placeholder.setWordWrap(True)
         placeholder_layout.addWidget(placeholder)
         
-        self.status_label.setText("Authentication required")
+        show_info("Authentication required")
     
     def initialize_with_services(self, sheets_service: CachedGoogleSheetsService, spreadsheet_id: str):
         """Initialize the dashboard with Google Sheets services."""
@@ -148,7 +144,7 @@ class OverviewTab(QWidget):
         # Create detail grid page
         self.create_detail_grid()
         
-        self.status_label.setText("Initializing analytics...")
+        show_loading("Initializing analytics...")
         
         # Initialize asynchronously to prevent UI blocking
         QTimer.singleShot(100, self.setup_dashboard)
@@ -179,7 +175,7 @@ class OverviewTab(QWidget):
             main_layout = QVBoxLayout(self.main_content)
             main_layout.addWidget(scroll_area)
             
-            self.status_label.setText("Dashboard ready - Click on any chart to explore in detail")
+            show_success("Dashboard ready - Click on any chart to explore in detail")
             self.refresh_button.setVisible(True)
             self.is_initialized = True
             
@@ -271,19 +267,19 @@ class OverviewTab(QWidget):
     def hide_dashboard_controls(self):
         """Hide dashboard-level controls when in detailed view."""
         self.refresh_button.setVisible(False)
-        self.status_label.setText("Detailed view active")
+        show_info("Detailed view active")
     
     def show_dashboard_controls(self):
         """Show dashboard-level controls when returning to overview."""
         self.refresh_button.setVisible(True)
-        self.status_label.setText("Dashboard ready - Click on any chart to explore in detail")
+        show_success("Dashboard ready - Click on any chart to explore in detail")
     
     def refresh_all_data(self):
         """Refresh data for all visualizations."""
         if not self.is_initialized:
             return
             
-        self.status_label.setText("Refreshing all data...")
+        show_loading("Refreshing all data...")
         self.refresh_button.setEnabled(False)
         
         try:
@@ -291,10 +287,7 @@ class OverviewTab(QWidget):
             for container in self.visualization_containers.values():
                 container.refresh_data()
             
-            self.status_label.setText("✅ Data refreshed successfully")
-            
-            # Reset status after delay
-            QTimer.singleShot(3000, lambda: self.status_label.setText("Dashboard ready - Click on any chart to explore in detail"))
+            show_success("Data refreshed successfully")
             
         except Exception as e:
             self.show_error(f"Error refreshing data: {e}")
@@ -303,7 +296,7 @@ class OverviewTab(QWidget):
     
     def show_error(self, message: str):
         """Show error message."""
-        self.status_label.setText(f"❌ {message}")
+        show_error(message)
         QMessageBox.warning(self, "Dashboard Error", message)
     
     def update_services(self, sheets_service: CachedGoogleSheetsService, spreadsheet_id: str):

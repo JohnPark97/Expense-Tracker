@@ -14,6 +14,7 @@ from PySide6.QtGui import QFont
 from services.cached_sheets_service import CachedGoogleSheetsService
 from ui.components import BaseEditableTable, ColumnConfig
 from ui.components import DataChangeNotifier
+from ui.components import show_info, show_success, show_warning, show_error, show_loading
 
 
 class MonthlyDataTab(BaseEditableTable):
@@ -221,11 +222,6 @@ class MonthlyDataTab(BaseEditableTable):
         
         controls_layout2.addStretch()
         
-        # Status label
-        self.status_label = QLabel("Ready")
-        self.status_label.setStyleSheet("color: #666; font-style: italic;")
-        layout.addWidget(self.status_label)
-        
         # Create table
         self.data_table = QTableWidget()
         self.data_table.setAlternatingRowColors(False)  
@@ -259,7 +255,7 @@ class MonthlyDataTab(BaseEditableTable):
             self.current_sheet_name = sheet_name
             self.sheet_name = sheet_name  # Update base class property
             
-            self.status_label.setText(f"🔄 Loading data for {sheet_name}...")
+            show_loading(f"Loading data for {sheet_name}...")
             
             # Check if sheet exists
             existing_sheets = self.sheets_service.get_sheet_names(self.spreadsheet_id)
@@ -267,11 +263,11 @@ class MonthlyDataTab(BaseEditableTable):
             if sheet_name in existing_sheets:
                 self.load_data()
             else:
-                self.status_label.setText(f"🔄 Creating new sheet '{sheet_name}'...")
+                show_loading(f"Creating new sheet '{sheet_name}'...")
                 self.create_new_sheet(sheet_name)
                 
         except Exception as e:
-            self.status_label.setText(f"❌ Error changing date: {e}")
+            show_error(f"Error changing date: {e}")
     
     def create_new_sheet(self, sheet_name: str):
         """Create a new expense sheet for the selected month."""
@@ -281,15 +277,15 @@ class MonthlyDataTab(BaseEditableTable):
             )
             
             if success:
-                self.status_label.setText(f"✅ Created new sheet '{sheet_name}'")
+                show_success(f"Created new sheet '{sheet_name}'")
                 # Load the newly created sheet
                 self.load_data()
             else:
-                self.status_label.setText(f"❌ Failed to create sheet '{sheet_name}'")
+                show_error(f"Failed to create sheet '{sheet_name}'")
                 self.show_empty_table()
                 
         except Exception as e:
-            self.status_label.setText(f"❌ Error creating sheet: {e}")
+            show_error(f"Error creating sheet: {e}")
             self.show_empty_table()
     
     def show_empty_table(self):
@@ -307,7 +303,7 @@ class MonthlyDataTab(BaseEditableTable):
             return
             
         try:
-            self.status_label.setText("📂 Loading expense data...")
+            show_loading("Loading expense data...")
             
             # Get data using direct API call
             range_name = f"'{self.current_sheet_name}'!A:Z"
@@ -317,19 +313,17 @@ class MonthlyDataTab(BaseEditableTable):
             
             if df.empty:
                 self.show_empty_table()
-                self.status_label.setText(f"📝 No expenses found for {self.current_sheet_name}")
+                show_info(f"No expenses found for {self.current_sheet_name}")
                 return
             
             # Populate table
             self.populate_table_with_data(df)
             
             # Show load status
-            self.status_label.setText(
-                f"✅ Loaded {len(df)} expenses for {self.current_sheet_name}"
-            )
+            show_success(f"Loaded {len(df)} expenses for {self.current_sheet_name}")
             
         except Exception as e:
-            self.status_label.setText(f"❌ Error loading data: {e}")
+            show_error(f"Error loading data: {e}")
             self.show_empty_table()
     
     def showEvent(self, event):
@@ -421,8 +415,7 @@ class MonthlyDataTab(BaseEditableTable):
             print(f"✅ Refreshed {updated_count} account dropdowns in monthly data tab")
             
             # Also update the status to show user the refresh happened
-            if hasattr(self, 'status_label'):
-                self.status_label.setText("✅ Account options updated")
+            show_success("Account options updated")
             
         except Exception as e:
             print(f"❌ Error refreshing account dropdowns: {e}")
@@ -452,8 +445,7 @@ class MonthlyDataTab(BaseEditableTable):
 
             print(f"✅ Refreshed {updated_count} category dropdowns in monthly data tab")
 
-            if hasattr(self, 'status_label'):
-                self.status_label.setText("✅ Category options updated")
+            show_success("Category options updated")
 
         except Exception as e:
             print(f"❌ Error refreshing category dropdowns: {e}")
@@ -471,7 +463,7 @@ class MonthlyDataTab(BaseEditableTable):
                 datetime.strptime(date_str.strip(), "%m/%d/%Y")
                 return True
             except ValueError:
-                self.status_label.setText("❌ Date must be in YYYY-MM-DD or MM/DD/YYYY format")
+                show_error("Date must be in YYYY-MM-DD or MM/DD/YYYY format")
                 return False
     
     def validate_amount(self, amount_str: str) -> bool:
@@ -483,13 +475,13 @@ class MonthlyDataTab(BaseEditableTable):
             amount = float(amount_str.strip())
             return amount >= 0
         except ValueError:
-            self.status_label.setText("❌ Amount must be a valid number")
+            show_error("Amount must be a valid number")
             return False
     
     def validate_before_add(self) -> bool:
         """Validate conditions before adding new expense."""
         if not self.current_sheet_name:
-            self.status_label.setText("❌ Please select a month first")
+            show_error("Please select a month first")
             return False
             
         return True
@@ -565,6 +557,7 @@ class MonthlyDataTab(BaseEditableTable):
                 
                 if category_name:
                     active_categories.append(category_name)
+
             
             print(f"📋 Loaded {len(active_categories)} categories: {active_categories}")
             return active_categories if active_categories else ["Food", "Transportation", "Shopping", "Bills", "Entertainment"]

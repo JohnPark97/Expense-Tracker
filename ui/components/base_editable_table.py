@@ -16,6 +16,7 @@ import pandas as pd
 
 from services.cached_sheets_service import CachedGoogleSheetsService
 from .reactive_combo_box import create_accounts_dropdown, create_categories_dropdown, ReactiveComboBox
+from .status_manager import show_info, show_success, show_warning, show_error, show_loading
 
 
 class ColumnConfig:
@@ -189,11 +190,6 @@ class BaseEditableTable(QWidget):
         
         controls_layout.addStretch()
         
-        # Status label
-        self.status_label = QLabel("Ready")
-        self.status_label.setStyleSheet("color: #666; font-style: italic;")
-        layout.addWidget(self.status_label)
-        
         # Table
         self.data_table = QTableWidget()
         self.data_table.setAlternatingRowColors(False)  # Disabled to allow custom highlighting
@@ -358,7 +354,7 @@ class BaseEditableTable(QWidget):
             self.row_added.emit(new_row_index)
             
         except Exception as e:
-            self.status_label.setText(f"❌ Error adding row: {str(e)}")
+            show_error(f"Error adding row: {str(e)}")
             # Reconnect signal in case of error
             if not self.data_table.receivers(self.data_table.itemChanged):
                 self.data_table.itemChanged.connect(self.on_table_item_changed)
@@ -413,7 +409,7 @@ class BaseEditableTable(QWidget):
     
     def _delete_rows_internal(self, selected_rows: set):
         """Internal method to delete rows."""
-        self.status_label.setText("🗑️ Deleting rows...")
+        show_loading("Deleting rows...")
         success_count = 0
         error_count = 0
         
@@ -459,9 +455,9 @@ class BaseEditableTable(QWidget):
         # Update status
         row_text = "row" if success_count == 1 else "rows"
         if error_count == 0:
-            self.status_label.setText(f"✅ Successfully deleted {success_count} {row_text}")
+            show_success(f"Successfully deleted {success_count} {row_text}")
         else:
-            self.status_label.setText(f"⚠️ Deleted {success_count}, failed {error_count}. Check connection.")
+            show_warning(f"Deleted {success_count}, failed {error_count}. Check connection.")
         
         # Refresh data to sync with server
         QTimer.singleShot(1000, self.refresh_data)
@@ -492,7 +488,7 @@ class BaseEditableTable(QWidget):
     
     def refresh_data(self):
         """Refresh data from the server."""
-        self.status_label.setText("🔄 Refreshing data...")
+        show_loading("Refreshing data...")
         self.load_data()
     
     def populate_table_with_data(self, df):
@@ -632,12 +628,12 @@ class BaseEditableTable(QWidget):
         
         # Check required fields
         if col_config.required and not value.strip():
-            self.status_label.setText(f"❌ {col_config.header} cannot be empty")
+            show_error(f"{col_config.header} cannot be empty")
             return False
         
         # Custom validation
         if col_config.validation and not col_config.validation(value):
-            self.status_label.setText(f"❌ Invalid value for {col_config.header}")
+            show_error(f"Invalid value for {col_config.header}")
             return False
         
         return True
@@ -729,7 +725,7 @@ class BaseEditableTable(QWidget):
         if not self.pending_changes_rows:
             return
         
-        self.status_label.setText("💾 Saving changes...")
+        show_loading("Saving changes...")
         self.confirm_button.setEnabled(False)
         
         try:
@@ -750,13 +746,12 @@ class BaseEditableTable(QWidget):
                 # Update server row count
                 self.server_row_count = self.data_table.rowCount()
                 
-                self.status_label.setText("✅ Changes saved successfully")
-                QTimer.singleShot(3000, lambda: self.status_label.setText("Ready"))
+                show_success("Changes saved successfully")
             else:
-                self.status_label.setText("❌ Failed to save changes")
+                show_error("Failed to save changes")
                 
         except Exception as e:
-            self.status_label.setText(f"❌ Error saving: {str(e)}")
+            show_error(f"Error saving: {str(e)}")
         
         self.confirm_button.setEnabled(True)
         self.update_confirm_button_visibility()

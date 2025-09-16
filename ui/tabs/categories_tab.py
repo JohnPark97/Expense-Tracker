@@ -9,6 +9,7 @@ from typing import List
 
 from services.cached_sheets_service import CachedGoogleSheetsService  
 from ui.components import BaseEditableTable, ColumnConfig, ReactiveDropdownManager
+from ui.components import show_info, show_success, show_warning, show_error, show_loading
 
 
 class CategoriesTab(BaseEditableTable):
@@ -63,7 +64,7 @@ class CategoriesTab(BaseEditableTable):
             if row != self.data_table.currentRow():
                 existing = self.get_cell_value(row, 0).strip().lower()
                 if existing == name_lower:
-                    self.status_label.setText(f"❌ Category '{name}' already exists")
+                    show_error(f"Category '{name}' already exists")
                     return False
         return True
     
@@ -72,7 +73,7 @@ class CategoriesTab(BaseEditableTable):
         try:
             existing_sheets = self.sheets_service.get_sheet_names(self.spreadsheet_id)
             if self.sheet_name not in existing_sheets:
-                self.status_label.setText(f"🔄 Creating {self.sheet_name} sheet...")
+                show_loading(f"Creating {self.sheet_name} sheet...")
                 
                 # Create sheet with headers
                 headers = [col.header for col in self.columns_config]
@@ -97,16 +98,16 @@ class CategoriesTab(BaseEditableTable):
                             [category_data], f"A{len(default_categories) + 2}"
                         )
                     
-                    self.status_label.setText(f"✅ {self.sheet_name} sheet created with default categories")
+                    show_success(f"{self.sheet_name} sheet created with default categories")
                 else:
-                    self.status_label.setText(f"❌ Failed to create {self.sheet_name} sheet")
+                    show_error(f"Failed to create {self.sheet_name} sheet")
         except Exception as e:
-            self.status_label.setText(f"❌ Error creating sheet: {e}")
+            show_error(f"Error creating sheet: {e}")
     
     def load_data(self):
         """Load categories data."""
         try:
-            self.status_label.setText("📂 Loading categories...")
+            show_loading("Loading categories...")
             
             range_name = f"'{self.sheet_name}'!A:B"
             df = self.sheets_service.get_data_as_dataframe(
@@ -116,15 +117,15 @@ class CategoriesTab(BaseEditableTable):
             if df.empty:
                 self.data_table.setRowCount(0)
                 self.server_row_count = 0
-                self.status_label.setText("📝 No categories found")
+                show_info("No categories found")
                 return
             
             self.populate_table_with_data(df)
             
-            self.status_label.setText(f"✅ Loaded {len(df)} categories")
+            show_success(f"Loaded {len(df)} categories")
             
         except Exception as e:
-            self.status_label.setText(f"❌ Error loading categories: {e}")
+            show_error(f"Error loading categories: {e}")
     
     def populate_table_with_data(self, df: pd.DataFrame):
         """Populate table with categories data."""

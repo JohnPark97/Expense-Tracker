@@ -14,6 +14,7 @@ from services.account_service import AccountService, BalanceChangeEvent
 from repositories.account_repository import AccountRepository, TransactionRepository
 from services.cached_sheets_service import CachedGoogleSheetsService
 from ui.components import BaseEditableTable, ColumnConfig, ReactiveDropdownManager
+from ui.components import show_info, show_success, show_warning, show_error, show_loading
 
 
 class AccountsTab(BaseEditableTable):
@@ -159,12 +160,12 @@ class AccountsTab(BaseEditableTable):
         
         # Update status and refresh
         if success_count > 0:
-            self.status_label.setText(f"✅ Deleted {success_count} account(s)")
+            show_success(f"Deleted {success_count} account(s)")
             self.accounts_changed.emit()  # Notify other components
             ReactiveDropdownManager.notify_accounts_changed()  # Notify all account dropdowns
             self.load_data()  # Refresh the table
         else:
-            self.status_label.setText("❌ Failed to delete accounts")
+            show_error("Failed to delete accounts")
     
     def save_changes_to_server(self) -> bool:
         """Override save to emit accounts changed signal."""
@@ -179,14 +180,14 @@ class AccountsTab(BaseEditableTable):
         """Load account data from service and populate table."""
         try:
             print("🔄 Loading accounts data...")
-            self.status_label.setText("🔄 Loading accounts...")
+            show_loading("Loading accounts...")
             
             # Get data from service
             df = self.get_data_from_service()
             
             if df.empty:
                 print("📝 No accounts found, showing empty table")
-                self.status_label.setText("📝 No accounts found")
+                show_info("No accounts found")
                 self.data_table.setRowCount(0)
                 return
             
@@ -194,11 +195,11 @@ class AccountsTab(BaseEditableTable):
             self.populate_table_with_data(df)
             
             print(f"✅ Loaded {len(df)} accounts successfully")
-            self.status_label.setText(f"✅ Loaded {len(df)} accounts")
+            show_success(f"Loaded {len(df)} accounts")
             
         except Exception as e:
             print(f"❌ Error loading accounts data: {e}")
-            self.status_label.setText(f"❌ Error loading data: {e}")
+            show_error(f"Error loading data: {e}")
             self.data_table.setRowCount(0)
     
     def _initialize_accounts(self):
@@ -411,6 +412,57 @@ class AccountsTab(BaseEditableTable):
             print(f"Error saving accounts using service: {e}")
             # Fallback to parent method
             return super().save_data_to_service(data)
+    
+    def populate_table_with_data(self, df):
+        """Populate table with account data and ensure clean state."""
+        try:
+            print(f"🔄 Populating table with {len(df)} rows...")
+            
+            # Temporarily disconnect signals to prevent false change detection
+            self.data_table.itemChanged.disconnect()
+            
+            # Clear pending changes when loading fresh data
+            self.pending_changes_rows.clear()
+            self.changed_cells.clear()
+            
+            # Set table size
+            self.data_table.setRowCount(len(df))
+            self.server_row_count = len(df)  # Update server row count
+            
+            # Populate rows
+            for row in range(len(df)):
+                for col in range(min(len(df.columns), len(self.columns_config))):
+                    value = str(df.iloc[row, col]) if pd.notna(df.iloc[row, col]) else ""
+                    
+                    # Create component for this cell
+                    component = self.create_cell_component(row, col, value)
+                    
+                    # Set component in table
+                    if hasattr(component, 'currentText'):  # It's a widget (dropdown)
+                        self.data_table.setCellWidget(row, col, component)
+                    else:  # It's a table item
+                        self.data_table.setItem(row, col, component)
+            
+            # Clear any highlighting from previous loads
+            self.clear_all_highlighting()
+            
+            # Store original values after populating table
+            self.store_original_values()
+            
+            # Update button visibility - should hide confirm button
+            self.update_button_visibility()
+            
+            # Reconnect signals
+            self.data_table.itemChanged.connect(self.on_table_item_changed)
+            
+            print(f"✅ Table populated successfully with {len(df)} rows")
+            
+        except Exception as e:
+            print(f"❌ Error populating table: {e}")
+            # Reconnect signal in case of error
+            if not self.data_table.receivers(self.data_table.itemChanged):
+                self.data_table.itemChanged.connect(self.on_table_item_changed)
+            raise
     
     def save_changes_to_server(self) -> bool:
         """Save all pending changes to the server using account service."""

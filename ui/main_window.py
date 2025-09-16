@@ -18,6 +18,7 @@ from ui.tabs.monthly_data_tab import MonthlyDataTab
 from ui.tabs.categories_tab import CategoriesTab
 from ui.tabs.accounts_tab import AccountsTab
 from ui.threads.auth_thread import AuthThread
+from ui.components import status_manager
 
 
 class MainWindow(QMainWindow):
@@ -191,13 +192,16 @@ Instructions:
         self.setup_help_menu()
     
     def setup_status_bar(self):
-        """Setup the status bar."""
+        """Setup the status bar with centralized status management."""
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         
         # Status label
         self.status_label = QLabel("Ready to connect")
         self.status_bar.addWidget(self.status_label)
+        
+        # Connect to centralized status manager
+        status_manager.set_status_label(self.status_label)
     
     def check_existing_auth(self):
         """Check if user is already authenticated."""
@@ -243,7 +247,7 @@ Instructions:
     
     def on_progress_update(self, message: str):
         """Handle progress updates."""
-        self.status_label.setText(message)
+        status_manager.show_loading(message)
     
     def on_auth_success(self):
         """Handle successful authentication."""
@@ -262,8 +266,7 @@ Instructions:
         self.setup_tabs_ui()
         
         # Update status
-        self.status_label.setText("✅ Connected to Google Sheets")
-        QTimer.singleShot(3000, lambda: self.status_label.setText("Ready"))
+        status_manager.show_success("Connected to Google Sheets")
     
     def on_auth_failed(self, error_message: str):
         """Handle authentication failure."""
@@ -282,7 +285,7 @@ Instructions:
             }
         """)
         
-        self.status_label.setText("❌ Authentication failed")
+        status_manager.show_error("Authentication failed")
         
         # Show error message
         QMessageBox.critical(self, "Authentication Failed", f"Failed to connect to Google Sheets:\n\n{error_message}")
@@ -291,7 +294,7 @@ Instructions:
         """Handle case when authentication is needed."""
         self.is_authenticated = False
         self.auth_status_label.setText("🔴 Not connected to Google Sheets")
-        self.status_label.setText("Ready to connect - Click login button")
+        status_manager.show_info("Ready to connect - Click login button")
     
     def setup_help_menu(self):
         """Setup help menu."""
