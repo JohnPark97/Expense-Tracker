@@ -13,7 +13,7 @@ from models.account_model import Account, AccountType, Currency, get_account_typ
 from services.account_service import AccountService, BalanceChangeEvent
 from repositories.account_repository import AccountRepository, TransactionRepository
 from services.cached_sheets_service import CachedGoogleSheetsService
-from ui.components import BaseEditableTable, ColumnConfig
+from ui.components import BaseEditableTable, ColumnConfig, ReactiveDropdownManager
 
 
 class AccountsTab(BaseEditableTable):
@@ -21,6 +21,7 @@ class AccountsTab(BaseEditableTable):
     
     # Custom signals
     account_balance_changed = Signal(str, float, float)  # account_id, old_balance, new_balance
+    accounts_changed = Signal()  # Emitted when accounts are added/deleted/modified
     
     def __init__(self, sheets_service: CachedGoogleSheetsService, spreadsheet_id: str):
         """Initialize accounts tab.
@@ -105,6 +106,74 @@ class AccountsTab(BaseEditableTable):
         
         # Add custom account management buttons
         self._add_account_management_buttons()
+    
+    def delete_selected_rows(self):
+        """Override delete to use account service for proper deletion."""
+        selected_rows = self.data_table.selectionModel().selectedRows()
+        if not selected_rows:
+            QMessageBox.information(self, "No Selection", "Please select accounts to delete.")
+            return
+        
+        # Get account names to delete
+        accounts_to_delete = []
+        for model_index in selected_rows:
+            row = model_index.row()
+            if row < self.data_table.rowCount():
+                account_name = self.data_table.item(row, 0).text() if self.data_table.item(row, 0) else ""
+                if account_name:
+                    accounts_to_delete.append(account_name)
+        
+        if not accounts_to_delete:
+            QMessageBox.warning(self, "No Accounts", "No valid accounts selected for deletion.")
+            return
+        
+        # Confirm deletion
+        account_list = "\n".join(f"• {name}" for name in accounts_to_delete)
+        reply = QMessageBox.question(
+            self,
+            "Delete Accounts",
+            f"Are you sure you want to delete these accounts?\n\n{account_list}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.No:
+            return
+        
+        # Delete accounts using account service
+        success_count = 0
+        for account_name in accounts_to_delete:
+            try:
+                # Find account by name
+                accounts = self.account_service.get_all_accounts(include_inactive=True)
+                account = next((acc for acc in accounts if acc.name == account_name), None)
+                
+                if account:
+                    if self.account_service.delete_account(account.id):
+                        success_count += 1
+                    else:
+                        print(f"Failed to delete account: {account_name}")
+                else:
+                    print(f"Account not found: {account_name}")
+            except Exception as e:
+                print(f"Error deleting account {account_name}: {e}")
+        
+        # Update status and refresh
+        if success_count > 0:
+            self.status_label.setText(f"✅ Deleted {success_count} account(s)")
+            self.accounts_changed.emit()  # Notify other components
+            ReactiveDropdownManager.notify_accounts_changed()  # Notify all account dropdowns
+            self.load_data()  # Refresh the table
+        else:
+            self.status_label.setText("❌ Failed to delete accounts")
+    
+    def save_changes_to_server(self) -> bool:
+        """Override save to emit accounts changed signal."""
+        success = super().save_changes_to_server()
+        if success:
+            self.accounts_changed.emit()  # Notify other components
+            ReactiveDropdownManager.notify_accounts_changed()  # Notify all account dropdowns
+            print("📢 Account changes saved - notifying other tabs and dropdowns")
+        return success
     
     def load_data(self):
         """Load account data from service and populate table."""
@@ -244,8 +313,9 @@ class AccountsTab(BaseEditableTable):
             
         except Exception as e:
             print(f"Error getting account data from service: {e}")
-            # Fallback to parent method
-            return super().get_data_from_service()
+            # Return empty DataFrame with correct columns instead of calling parent
+            columns = [config.header for config in self.columns_config]
+            return pd.DataFrame(columns=columns)
     
     def save_data_to_service(self, data: List[List[str]]) -> bool:
         """Save account data using account service.

@@ -92,7 +92,7 @@ class AccountRepository:
             # Get data from sheet
             range_name = f"'{self.sheet_name}'!A:I"
             df = self.sheets_service.get_data_as_dataframe(
-                self.spreadsheet_id, range_name, use_cache=False
+                self.spreadsheet_id, range_name
             )
             
             if df.empty:
@@ -175,7 +175,7 @@ class AccountRepository:
             
             # Get current data to find next row
             df = self.sheets_service.get_data_as_dataframe(
-                self.spreadsheet_id, f"'{self.sheet_name}'!A:H", use_cache=False
+                self.spreadsheet_id, f"'{self.sheet_name}'!A:H"
             )
             
             next_row = len(df) + 2  # +1 for header, +1 for 1-based indexing
@@ -214,7 +214,7 @@ class AccountRepository:
         try:
             # Get current data
             df = self.sheets_service.get_data_as_dataframe(
-                self.spreadsheet_id, f"'{self.sheet_name}'!A:I", use_cache=False
+                self.spreadsheet_id, f"'{self.sheet_name}'!A:I"
             )
             
             if df.empty:
@@ -269,7 +269,7 @@ class AccountRepository:
             return False
     
     def delete_account(self, account_id: str) -> bool:
-        """Delete an account (soft delete by marking inactive).
+        """Hard delete an account from the Google Sheet.
         
         Args:
             account_id: ID of account to delete.
@@ -283,11 +283,35 @@ class AccountRepository:
                 print(f"Account {account_id} not found for deletion")
                 return False
             
-            # Soft delete by marking inactive
-            account.is_active = False
-            account.updated_at = datetime.now()
+            # Find the row number for this account - get raw dataframe
+            range_name = f"'{self.sheet_name}'!A:H"
+            df = self.sheets_service.get_data_as_dataframe(
+                self.spreadsheet_id, range_name
+            )
             
-            return self.update_account(account)
+            if df.empty:
+                print(f"No accounts found in sheet")
+                return False
+            
+            # Find row with matching account ID
+            account_row = None
+            for idx, row in df.iterrows():
+                if str(row.get('ID', '')) == account_id:
+                    account_row = idx + 2  # +2 because DataFrame is 0-based and sheet has header
+                    break
+            
+            if account_row is None:
+                print(f"Account {account_id} not found in sheet for deletion")
+                return False
+            
+            # Hard delete the row from Google Sheets
+            success = self.sheets_service.delete_multiple_rows(
+                self.spreadsheet_id, self.sheet_name, [account_row]
+            )
+            
+            if success:
+                print(f"✅ Account hard-deleted from sheet: {account.name}")
+            return success
             
         except Exception as e:
             print(f"Error deleting account: {e}")
@@ -437,7 +461,7 @@ class TransactionRepository:
             
             # Get current data to find next row
             df = self.sheets_service.get_data_as_dataframe(
-                self.spreadsheet_id, f"'{self.sheet_name}'!A:M", use_cache=False
+                self.spreadsheet_id, f"'{self.sheet_name}'!A:M"
             )
             
             next_row = len(df) + 2  # +1 for header, +1 for 1-based indexing
@@ -479,7 +503,7 @@ class TransactionRepository:
             # Get all transactions data
             range_name = f"'{self.sheet_name}'!A:M"
             df = self.sheets_service.get_data_as_dataframe(
-                self.spreadsheet_id, range_name, use_cache=False
+                self.spreadsheet_id, range_name
             )
             
             if df.empty:

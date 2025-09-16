@@ -80,68 +80,28 @@ class CachedGoogleSheetsService:
                     rows = []
             
             # Cache the data
-            self.cache_service.cache_sheet_data(sheet_name, headers, rows, save_immediately=False)
+            # No caching - data will be fetched fresh each time
             print(f"📄 Cached '{sheet_name}': {len(rows)} rows")
             
         except Exception as e:
             print(f"⚠️ Error fetching sheet '{sheet_name}': {e}")
     
-    def get_data_as_dataframe(self, spreadsheet_id: str, range_name: str, 
-                             use_cache: bool = True) -> pd.DataFrame:
-        """Get sheet data as DataFrame, using cache when available.
+    def get_data_as_dataframe(self, spreadsheet_id: str, range_name: str) -> pd.DataFrame:
+        """Get sheet data as DataFrame directly from API.
         
         Args:
             spreadsheet_id: The spreadsheet ID.
             range_name: Range in format 'SheetName!A:Z'.
-            use_cache: Whether to use cached data.
             
         Returns:
             DataFrame with the data.
         """
-        # Extract sheet name from range
+        # Extract sheet name from range for logging
         sheet_name = range_name.split('!')[0].strip("'")
         
-        if use_cache and self.cache_service.is_sheet_cached(sheet_name):
-            # Return cached data
-            cached_data = self.cache_service.get_sheet_data(sheet_name)
-            if cached_data:
-                headers = cached_data["headers"]
-                rows = cached_data["rows"]
-                
-                if rows:
-                    # Fix column count mismatch by padding or trimming rows
-                    normalized_rows = []
-                    for row in rows:
-                        if len(row) < len(headers):
-                            # Pad row with empty strings
-                            padded_row = row + [''] * (len(headers) - len(row))
-                            normalized_rows.append(padded_row)
-                        elif len(row) > len(headers):
-                            # Trim row to match headers
-                            trimmed_row = row[:len(headers)]
-                            normalized_rows.append(trimmed_row)
-                        else:
-                            # Row length matches headers
-                            normalized_rows.append(row)
-                    
-                    df = pd.DataFrame(normalized_rows, columns=headers)
-                    print(f"📂 Using cached data for '{sheet_name}' ({len(normalized_rows)} rows, {len(headers)} columns)")
-                else:
-                    df = pd.DataFrame(columns=headers)
-                    print(f"📂 Using cached data for '{sheet_name}' (0 rows, {len(headers)} columns)")
-                
-                return df
-        
-        # Fallback to API call
+        # Always use direct API call (no caching)
         print(f"🌐 Fetching '{sheet_name}' from API...")
         df = self.sheets_service.get_data_as_dataframe(spreadsheet_id, range_name)
-        
-        # Cache the fresh data
-        if not df.empty:
-            headers = list(df.columns)
-            rows = df.values.tolist()
-            rows = [[str(cell) if pd.notna(cell) else "" for cell in row] for row in rows]
-            self.cache_service.cache_sheet_data(sheet_name, headers, rows)
         
         return df
     
@@ -157,17 +117,11 @@ class CachedGoogleSheetsService:
         """
         success = self.sheets_service.create_expense_sheet(spreadsheet_id, sheet_name)
         
-        if success:
-            # Cache the new empty sheet
-            headers = ["Date", "Description", "Amount", "Category", "Account", "Notes"]
-            self.cache_service.cache_sheet_data(sheet_name, headers, [])
-            print(f"📝 Cached new sheet '{sheet_name}'")
-        
         return success
     
     def batch_update_sheet_data(self, spreadsheet_id: str, sheet_name: str, 
                                batch_updates: List[Dict[str, Any]]) -> bool:
-        """Update sheet data in batch and update cache.
+        """Update sheet data in batch without caching.
         
         Args:
             spreadsheet_id: The spreadsheet ID.
@@ -180,10 +134,6 @@ class CachedGoogleSheetsService:
         success = self.sheets_service.batch_update_sheet_data(
             spreadsheet_id, sheet_name, batch_updates
         )
-        
-        if success:
-            # Update cache with the changes
-            self._update_cache_from_batch_updates(sheet_name, batch_updates)
         
         return success
     
@@ -214,17 +164,15 @@ class CachedGoogleSheetsService:
                 row_num = int(''.join(filter(str.isdigit, start_cell))) - 2  # -2 for header and 0-based
                 
                 if row_num >= 0 and len(values) > 0:
-                    # Update the row in cache
-                    self.cache_service.update_row_in_cache(sheet_name, row_num, values[0])
+                    # No cache updates - data will be fetched fresh
+                    pass
             
         except Exception as e:
-            print(f"⚠️ Error updating cache from batch updates: {e}")
-            # Fallback: refetch the entire sheet
-            self._fetch_and_cache_sheet(sheet_name)
+            print(f"⚠️ Batch update processing - no cache updates needed: {e}")
     
     def delete_multiple_rows(self, spreadsheet_id: str, sheet_name: str, 
                            row_numbers: List[int]) -> bool:
-        """Delete multiple rows and update cache.
+        """Delete multiple rows without caching.
         
         Args:
             spreadsheet_id: The spreadsheet ID.
@@ -237,15 +185,6 @@ class CachedGoogleSheetsService:
         success = self.sheets_service.delete_multiple_rows(
             spreadsheet_id, sheet_name, row_numbers
         )
-        
-        if success:
-            # Convert 1-based sheet row numbers to 0-based cache indices
-            # Subtract 2: -1 for 1-based to 0-based, -1 for header row
-            cache_indices = [row_num - 2 for row_num in row_numbers if row_num >= 2]
-            cache_indices = [idx for idx in cache_indices if idx >= 0]
-            
-            if cache_indices:
-                self.cache_service.delete_rows_from_cache(sheet_name, cache_indices)
         
         return success
     
@@ -266,32 +205,18 @@ class CachedGoogleSheetsService:
         # For now, just return True as accounts are managed through AccountsTab
         return True
     
-    def get_accounts(self, spreadsheet_id: str, use_cache: bool = True) -> List[str]:
-        """Get account names, using cache when available.
+    def get_accounts(self, spreadsheet_id: str) -> List[str]:
+        """Get account names using direct API call only.
         
         Args:
             spreadsheet_id: The spreadsheet ID.
-            use_cache: Whether to use cached data.
             
         Returns:
             List of account names.
         """
-        if use_cache and self.cache_service.is_sheet_cached("accounts"):
-            cached_data = self.cache_service.get_sheet_data("accounts")
-            if cached_data:
-                accounts = []
-                for row in cached_data.get("rows", []):
-                    if len(row) >= 2 and row[1]:  # Has account name (column B)
-                        accounts.append(row[1])
-                
-                if accounts:
-                    print(f"📂 Using cached accounts: {accounts}")
-                    return accounts
-        
-        # Fallback to API
         print("🌐 Fetching accounts from API...")
         try:
-            df = self.get_data_as_dataframe(spreadsheet_id, "'Accounts'!A:H", use_cache)
+            df = self.get_data_as_dataframe(spreadsheet_id, "'Accounts'!A:H")
             if not df.empty and len(df.columns) > 1:
                 # Get account names from the 'Name' column (column B, index 1)
                 if 'Name' in df.columns:
@@ -303,6 +228,7 @@ class CachedGoogleSheetsService:
                 
                 # Filter out empty values
                 accounts = [name for name in account_names if name.strip()]
+                print(f"📋 Loaded accounts from API: {accounts}")
                 return accounts
         except Exception as e:
             print(f"Error fetching accounts: {e}")
@@ -327,11 +253,6 @@ class CachedGoogleSheetsService:
             
             if success:
                 print(f"✅ Created sheet '{sheet_name}' successfully")
-                # Clear sheet names cache to force refresh
-                self.cache_service.delete_sheet_data("sheet_names")
-                # Initialize the new sheet in cache
-                if headers:
-                    self.cache_service.cache_sheet_data(sheet_name.lower().replace(' ', '-'), headers, [])
             
             return success
             
@@ -339,50 +260,25 @@ class CachedGoogleSheetsService:
             print(f"Error creating sheet '{sheet_name}': {e}")
             return False
     
-    def get_sheet_names(self, spreadsheet_id: str, use_cache: bool = True) -> List[str]:
-        """Get sheet names, optionally from cache.
+    def get_sheet_names(self, spreadsheet_id: str) -> List[str]:
+        """Get sheet names using direct API call.
         
         Args:
             spreadsheet_id: The spreadsheet ID.
-            use_cache: Whether to use cached names.
             
         Returns:
             List of sheet names.
         """
-        if use_cache:
-            cached_names = self.cache_service.get_cached_sheet_names()
-            if cached_names:
-                # Convert cache keys back to display names
-                display_names = []
-                for cache_key in cached_names:
-                    if cache_key == "accounts":
-                        display_names.append("Accounts")
-                    elif cache_key == "account-holders":
-                        display_names.append("Account Holders")
-                    else:
-                        # Convert 'january-2025' back to 'January 2025'
-                        parts = cache_key.split('-')
-                        if len(parts) >= 2:
-                            month = parts[0].capitalize()
-                            year = parts[1]
-                            display_names.append(f"{month} {year}")
-                        else:
-                            display_names.append(cache_key.replace('-', ' ').title())
-                
-                print(f"📂 Using cached sheet names: {display_names}")
-                return display_names
-        
-        # Fallback to API
+        # Always use direct API call (no caching)
         return self.sheets_service.get_sheet_names(spreadsheet_id)
     
     def get_cache_stats(self) -> Dict[str, Any]:
-        """Get cache statistics."""
-        return self.cache_service.get_cache_stats()
+        """Get cache statistics - returns empty since caching is disabled."""
+        return {"message": "Caching disabled - using direct API calls"}
     
     def clear_cache(self) -> None:
-        """Clear the cache."""
-        self.cache_service.clear_cache()
-        self._fetch_fresh_data_on_startup = True
+        """Clear all cached data - no-op since caching is disabled."""
+        pass
     
     def is_authenticated(self) -> bool:
         """Check if authenticated."""

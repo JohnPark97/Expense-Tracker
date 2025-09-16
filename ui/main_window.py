@@ -173,6 +173,9 @@ Instructions:
         self.categories_tab = CategoriesTab(self.sheets_service, self.spreadsheet_id)
         self.accounts_tab = AccountsTab(self.sheets_service, self.spreadsheet_id)
         
+        # Connect account changes to other tabs
+        self.accounts_tab.accounts_changed.connect(self.monthly_tab.refresh_account_dropdowns)
+        
         self.tabs_widget.addTab(self.overview_tab, "📊 Overview")
         self.tabs_widget.addTab(self.monthly_tab, "📅 Monthly Data")
         self.tabs_widget.addTab(self.accounts_tab, "🏦 Accounts")
@@ -180,6 +183,9 @@ Instructions:
         
         # Set default tab
         self.tabs_widget.setCurrentIndex(0)
+        
+        # Connect tab change to refresh dropdowns
+        self.tabs_widget.currentChanged.connect(self.on_tab_changed)
         
         # Setup help menu
         self.setup_help_menu()
@@ -325,3 +331,17 @@ Authentication: {'Connected' if self.is_authenticated else 'Not connected'}
             self.auth_thread.wait()
         
         event.accept()
+    
+    def on_tab_changed(self, index: int):
+        """Handle tab changes to refresh dropdowns if needed."""
+        try:
+            current_widget = self.tabs_widget.widget(index)
+            # If switching to monthly data tab, refresh its dropdowns
+            if hasattr(current_widget, 'refresh_account_dropdowns'):
+                from PySide6.QtCore import QTimer
+                # Small delay to ensure tab is fully loaded
+                QTimer.singleShot(50, current_widget.refresh_account_dropdowns)
+                if hasattr(current_widget, 'refresh_category_dropdowns'):
+                    QTimer.singleShot(50, current_widget.refresh_category_dropdowns)
+        except Exception as e:
+            print(f"Error in tab change handler: {e}")

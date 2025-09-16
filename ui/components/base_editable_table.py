@@ -15,6 +15,7 @@ from datetime import datetime
 import pandas as pd
 
 from services.cached_sheets_service import CachedGoogleSheetsService
+from .reactive_combo_box import create_accounts_dropdown, create_categories_dropdown, ReactiveComboBox
 
 
 class ColumnConfig:
@@ -232,7 +233,7 @@ class BaseEditableTable(QWidget):
         self.data_table.itemChanged.connect(self.on_table_item_changed)
         self.data_table.selectionModel().selectionChanged.connect(self.on_selection_changed)
     
-    def create_cell_component(self, row: int, col: int, value: str = "") -> Union[QTableWidgetItem, QComboBox]:
+    def create_cell_component(self, row: int, col: int, value: str = "") -> Union[QTableWidgetItem, ReactiveComboBox, QComboBox]:
         """Create appropriate component for a cell based on column configuration.
         
         Args:
@@ -246,28 +247,36 @@ class BaseEditableTable(QWidget):
         col_config = self.columns_config[col]
         
         if col_config.component_type == "dropdown":
-            # Create dropdown
-            combo = QComboBox()
+            # Create reactive dropdown based on the data source
+            combo = None
             
-            # Get options
-            if col_config.options_source:
-                # Get options from method
-                options = getattr(self, col_config.options_source, lambda: [])()
+            if col_config.options_source == "get_accounts":
+                # Create reactive accounts dropdown
+                combo = create_accounts_dropdown(self.get_accounts, parent=self)
+                print(f"🔄 Creating reactive account dropdown")
+            elif col_config.options_source == "get_categories":
+                # Create reactive categories dropdown  
+                combo = create_categories_dropdown(self.get_categories, parent=self)
+                print(f"🔄 Creating reactive category dropdown")
             else:
-                options = col_config.options
+                # Create regular dropdown for static options
+                combo = QComboBox()
+                if col_config.options:
+                    combo.addItems(col_config.options)
+                combo.setEditable(col_config.component_config.get("editable", True))
             
-            combo.addItems(options)
-            combo.setEditable(col_config.component_config.get("editable", True))
-            combo.setCurrentText(value)
-            
-            # Connect signal
-            combo.currentTextChanged.connect(
-                lambda text, r=row, c=col: self.on_dropdown_changed(r, c, text)
-            )
-            
-            # Set tooltip
-            if col_config.tooltip:
-                combo.setToolTip(col_config.tooltip)
+            if combo:
+                # Set current value
+                combo.setCurrentText(value)
+                
+                # Connect signal
+                combo.currentTextChanged.connect(
+                    lambda text, r=row, c=col: self.on_dropdown_changed(r, c, text)
+                )
+                
+                # Set tooltip
+                if col_config.tooltip:
+                    combo.setToolTip(col_config.tooltip)
             
             return combo
             
@@ -498,10 +507,6 @@ class BaseEditableTable(QWidget):
             # Set table size
             self.data_table.setRowCount(len(df))
             
-            # Get dynamic options for dropdowns
-            categories = self.get_categories() if hasattr(self, 'get_categories') else []
-            accounts = self.get_accounts() if hasattr(self, 'get_accounts') else []
-            
             # Populate rows
             for row in range(len(df)):
                 for col in range(min(len(df.columns), len(self.columns_config))):
@@ -510,31 +515,17 @@ class BaseEditableTable(QWidget):
                     # Create component for this cell
                     component = self.create_cell_component(row, col, value)
                     
-                    # For dropdowns, populate options
-                    col_config = self.columns_config[col]
-                    if col_config.component_type == "dropdown" and hasattr(component, 'addItems'):
-                        # Clear and add options
-                        component.clear()
-                        
-                        # Get options from config or dynamic source
-                        if col_config.options_source == "get_categories" and categories:
-                            component.addItems(categories)
-                        elif col_config.options_source == "get_accounts" and accounts:
-                            component.addItems(accounts)
-                        elif col_config.options:
-                            component.addItems(col_config.options)
-                        
-                        # Set current value
-                        component.setCurrentText(value)
-                    
                     # Set component in table
-                    if hasattr(component, 'currentText'):  # It's a widget
+                    if hasattr(component, 'currentText'):  # It's a widget (dropdown)
                         self.data_table.setCellWidget(row, col, component)
                     else:  # It's a table item
                         self.data_table.setItem(row, col, component)
             
             # Clear any highlighting from previous loads
             self.clear_all_highlighting()
+            
+            # Store original values after populating table
+            self.store_original_values()
             
             # Update button visibility
             self.update_button_visibility()

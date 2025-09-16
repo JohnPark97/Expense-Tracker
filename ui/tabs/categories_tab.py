@@ -8,7 +8,7 @@ import pandas as pd
 from typing import List
 
 from services.cached_sheets_service import CachedGoogleSheetsService  
-from ui.components import BaseEditableTable, ColumnConfig
+from ui.components import BaseEditableTable, ColumnConfig, ReactiveDropdownManager
 
 
 class CategoriesTab(BaseEditableTable):
@@ -36,30 +36,6 @@ class CategoriesTab(BaseEditableTable):
                 component_type="text",
                 tooltip="Optional description of the category",
                 resize_mode="stretch"
-            ),
-            ColumnConfig(
-                header="Budget Limit",
-                component_type="number",
-                tooltip="Optional monthly budget limit for this category",
-                validation=self.validate_budget_limit,
-                default_value="0.00",
-                resize_mode="content"
-            ),
-            ColumnConfig(
-                header="Color",
-                component_type="dropdown",
-                options=["Red", "Blue", "Green", "Yellow", "Purple", "Orange", "Pink", "Cyan"],
-                tooltip="Color for visualizations",
-                default_value="Blue",
-                resize_mode="content"
-            ),
-            ColumnConfig(
-                header="Active",
-                component_type="dropdown",
-                options=["Yes", "No"],
-                tooltip="Whether this category is active",
-                default_value="Yes",
-                resize_mode="content"
             )
         ]
         
@@ -91,18 +67,6 @@ class CategoriesTab(BaseEditableTable):
                     return False
         return True
     
-    def validate_budget_limit(self, amount_str: str) -> bool:
-        """Validate budget limit."""
-        if not amount_str.strip():
-            return True  # Empty is OK for optional field
-            
-        try:
-            amount = float(amount_str.strip())
-            return amount >= 0
-        except ValueError:
-            self.status_label.setText("❌ Budget limit must be a valid number")
-            return False
-    
     def ensure_categories_sheet(self):
         """Ensure Categories sheet exists."""
         try:
@@ -119,12 +83,12 @@ class CategoriesTab(BaseEditableTable):
                 if success:
                     # Add some default categories
                     default_categories = [
-                        ["Food & Dining", "Restaurants, groceries, meals", "500.00", "Green", "Yes"],
-                        ["Transportation", "Gas, parking, public transit", "300.00", "Blue", "Yes"], 
-                        ["Shopping", "Clothes, electronics, misc purchases", "200.00", "Purple", "Yes"],
-                        ["Bills & Utilities", "Rent, electricity, internet, phone", "1000.00", "Red", "Yes"],
-                        ["Entertainment", "Movies, games, subscriptions", "100.00", "Orange", "Yes"],
-                        ["Healthcare", "Medical, pharmacy, insurance", "200.00", "Cyan", "Yes"]
+                        ["Food & Dining", "Restaurants, groceries, meals"],
+                        ["Transportation", "Gas, parking, public transit"], 
+                        ["Shopping", "Clothes, electronics, misc purchases"],
+                        ["Bills & Utilities", "Rent, electricity, internet, phone"],
+                        ["Entertainment", "Movies, games, subscriptions"],
+                        ["Healthcare", "Medical, pharmacy, insurance"]
                     ]
                     
                     for category_data in default_categories:
@@ -144,9 +108,9 @@ class CategoriesTab(BaseEditableTable):
         try:
             self.status_label.setText("📂 Loading categories...")
             
-            range_name = f"'{self.sheet_name}'!A:E"
+            range_name = f"'{self.sheet_name}'!A:B"
             df = self.sheets_service.get_data_as_dataframe(
-                self.spreadsheet_id, range_name, use_cache=False
+                self.spreadsheet_id, range_name
             )
             
             if df.empty:
@@ -190,11 +154,20 @@ class CategoriesTab(BaseEditableTable):
         # Reconnect signals
         self.data_table.itemChanged.connect(self.on_table_item_changed)
     
+    def delete_selected_rows(self):
+        """Override delete to notify category dropdowns."""
+        # Call parent delete functionality
+        super().delete_selected_rows()
+        
+        # Notify all category dropdowns of the change
+        ReactiveDropdownManager.notify_categories_changed()
+        print("📢 Categories deleted - notifying all category dropdowns")
+    
     def save_changes_to_server(self) -> bool:
         """Save changes to server."""
         try:
             df = self.sheets_service.get_data_as_dataframe(
-                self.spreadsheet_id, f"'{self.sheet_name}'!A:E", use_cache=False
+                self.spreadsheet_id, f"'{self.sheet_name}'!A:E"
             )
             current_server_rows = len(df)
             
@@ -212,9 +185,13 @@ class CategoriesTab(BaseEditableTable):
                 batch_updates.append({'range': range_str, 'values': [row_data]})
             
             if batch_updates:
-                return self.sheets_service.batch_update_sheet_data(
+                success = self.sheets_service.batch_update_sheet_data(
                     self.spreadsheet_id, self.sheet_name, batch_updates
                 )
+                if success:
+                    ReactiveDropdownManager.notify_categories_changed()  # Notify all category dropdowns
+                    print(f"📢 Categories saved - notifying all category dropdowns")
+                return success
             return True
             
         except Exception as e:

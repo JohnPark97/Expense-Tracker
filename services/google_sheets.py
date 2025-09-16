@@ -157,7 +157,25 @@ class GoogleSheetsService:
             
             if has_header and len(values) > 1:
                 # First row as column headers
-                df = pd.DataFrame(values[1:], columns=values[0])
+                headers = values[0]
+                data_rows = values[1:]
+                
+                # Normalize row lengths to match header count
+                normalized_rows = []
+                for row in data_rows:
+                    if len(row) < len(headers):
+                        # Pad row with empty strings
+                        padded_row = row + [''] * (len(headers) - len(row))
+                        normalized_rows.append(padded_row)
+                    elif len(row) > len(headers):
+                        # Trim row to match headers
+                        trimmed_row = row[:len(headers)]
+                        normalized_rows.append(trimmed_row)
+                    else:
+                        # Row length matches headers
+                        normalized_rows.append(row)
+                
+                df = pd.DataFrame(normalized_rows, columns=headers)
             elif has_header and len(values) == 1:
                 # Only header row
                 df = pd.DataFrame(columns=values[0])

@@ -43,49 +43,32 @@ class AccountService:
         self._balance_change_subscribers: List[Callable[[BalanceChangeEvent], None]] = []
         self._lock = threading.Lock()
         
-        # Cache for frequently accessed accounts
-        self._accounts_cache: Dict[str, Account] = {}
-        self._cache_last_refresh: Optional[datetime] = None
-        self._cache_ttl_seconds = 300  # 5 minutes
     
     # ======================== Account Management ========================
     
-    def get_all_accounts(self, include_inactive: bool = False, refresh_cache: bool = False) -> List[Account]:
-        """Get all accounts with optional caching.
+    def get_all_accounts(self, include_inactive: bool = False) -> List[Account]:
+        """Get all accounts directly from repository.
         
         Args:
             include_inactive: Whether to include inactive accounts.
-            refresh_cache: Force refresh of accounts cache.
             
         Returns:
             List of Account objects.
         """
-        # Check cache freshness
-        if (refresh_cache or not self._cache_last_refresh or 
-            (datetime.now() - self._cache_last_refresh).total_seconds() > self._cache_ttl_seconds):
-            self._refresh_accounts_cache()
-        
-        accounts = list(self._accounts_cache.values())
-        
-        if not include_inactive:
-            accounts = [acc for acc in accounts if acc.is_active]
+        accounts = self.account_repo.get_all_accounts(include_inactive=include_inactive)
         
         return accounts
     
-    def get_account_by_id(self, account_id: str, refresh_cache: bool = False) -> Optional[Account]:
-        """Get account by ID with caching.
+    def get_account_by_id(self, account_id: str) -> Optional[Account]:
+        """Get account by ID directly from repository.
         
         Args:
             account_id: Account ID to find.
-            refresh_cache: Force refresh of accounts cache.
             
         Returns:
             Account object if found, None otherwise.
         """
-        if refresh_cache or account_id not in self._accounts_cache:
-            self._refresh_accounts_cache()
-        
-        return self._accounts_cache.get(account_id)
+        return self.account_repo.get_account_by_id(account_id)
     
     def create_account(self, account: Account) -> bool:
         """Create a new account.
@@ -112,8 +95,6 @@ class AccountService:
             success = self.account_repo.create_account(account)
             
             if success:
-                # Update cache
-                self._accounts_cache[account.id] = account
                 print(f"✅ Account created successfully: {account.display_name}")
                 return True
             
@@ -149,8 +130,6 @@ class AccountService:
             success = self.account_repo.update_account(account)
             
             if success:
-                # Update cache
-                self._accounts_cache[account.id] = account
                 
                 # Trigger balance change event if balance changed
                 if old_balance != new_balance:
@@ -167,7 +146,7 @@ class AccountService:
             return False
     
     def delete_account(self, account_id: str) -> bool:
-        """Delete an account (soft delete).
+        """Hard delete an account from Google Sheets.
         
         Args:
             account_id: ID of account to delete.
@@ -184,17 +163,14 @@ class AccountService:
             # Check if account has transactions
             transactions = self.transaction_repo.get_transactions_by_account(account_id, limit=1)
             if transactions:
-                print(f"⚠️  Account {account.name} has transactions. Soft deleting...")
+                print(f"⚠️  Account {account.name} has transactions - still proceeding with hard delete")
             
-            # Soft delete
+            # Hard delete from sheet
             success = self.account_repo.delete_account(account_id)
             
             if success:
-                # Update cache
-                if account_id in self._accounts_cache:
-                    self._accounts_cache[account_id].is_active = False
                 
-                print(f"✅ Account deleted: {account.display_name}")
+                print(f"✅ Account hard-deleted: {account.display_name}")
                 return True
             
             return False
@@ -243,8 +219,6 @@ class AccountService:
             success = self.account_repo.update_account(account)
             
             if success:
-                # Update cache
-                self._accounts_cache[account_id] = account
                 
                 # Trigger balance change event
                 event = BalanceChangeEvent(account, old_balance, new_balance)
@@ -307,15 +281,12 @@ class AccountService:
                 print(f"Failed to update primary account balance")
                 return False
             
-            # Update cache
-            self._accounts_cache[account.id] = account
             
             # Handle transfer destination
             if to_account:
                 to_account.current_balance += transaction.amount
                 success = self.account_repo.update_account(to_account)
                 if success:
-                    self._accounts_cache[to_account.id] = to_account
                     print(f"🔄 Transfer: ${transaction.amount:.2f} from {account.name} to {to_account.name}")
                 else:
                     print(f"⚠️  Transfer partially completed - destination account update failed")
@@ -533,15 +504,6 @@ class AccountService:
     
     # ======================== Private Helper Methods ========================
     
-    def _refresh_accounts_cache(self):
-        """Refresh the accounts cache from repository."""
-        try:
-            accounts = self.account_repo.get_all_accounts(include_inactive=True)
-            self._accounts_cache = {acc.id: acc for acc in accounts}
-            self._cache_last_refresh = datetime.now()
-            print(f"🔄 Refreshed accounts cache: {len(accounts)} accounts loaded")
-        except Exception as e:
-            print(f"Error refreshing accounts cache: {e}")
     
     def _validate_account(self, account: Account) -> bool:
         """Validate account data.

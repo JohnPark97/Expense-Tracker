@@ -13,6 +13,7 @@ from PySide6.QtGui import QFont
 
 from services.cached_sheets_service import CachedGoogleSheetsService
 from ui.components import BaseEditableTable, ColumnConfig
+from ui.components import DataChangeNotifier
 
 
 class MonthlyDataTab(BaseEditableTable):
@@ -98,6 +99,13 @@ class MonthlyDataTab(BaseEditableTable):
             add_button_text="➕ Add New Expense"
         )
         
+        # Listen for category changes to refresh visible dropdowns
+        try:
+            self._notifier = DataChangeNotifier()
+            self._notifier.categories_changed.connect(self.refresh_category_dropdowns)
+        except Exception:
+            pass
+
         # Set default values
         self.setup_default_values()
     
@@ -304,7 +312,7 @@ class MonthlyDataTab(BaseEditableTable):
             # Get data using direct API call
             range_name = f"'{self.current_sheet_name}'!A:Z"
             df = self.sheets_service.get_data_as_dataframe(
-                self.spreadsheet_id, range_name, use_cache=False
+                self.spreadsheet_id, range_name
             )
             
             if df.empty:
@@ -323,6 +331,13 @@ class MonthlyDataTab(BaseEditableTable):
         except Exception as e:
             self.status_label.setText(f"❌ Error loading data: {e}")
             self.show_empty_table()
+    
+    def showEvent(self, event):
+        """Handle when tab becomes visible - refresh dropdowns."""
+        super().showEvent(event)
+        # Small delay to ensure tab is fully loaded
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(100, self.refresh_account_dropdowns)
     
     def populate_table_with_data(self, df: pd.DataFrame):
         """Populate table with expense data."""
@@ -377,6 +392,72 @@ class MonthlyDataTab(BaseEditableTable):
         # Reconnect signals
         self.data_table.itemChanged.connect(self.on_table_item_changed)
     
+    def refresh_account_dropdowns(self):
+        """Refresh account dropdown options in all visible dropdowns."""
+        try:
+            print("🔄 Refreshing account dropdowns in monthly data tab...")
+            
+            # Get updated account list
+            accounts = self.get_accounts()
+            print(f"📋 Available accounts: {accounts}")
+            
+            # Update all account dropdown widgets (column 4)
+            updated_count = 0
+            for row in range(self.data_table.rowCount()):
+                widget = self.data_table.cellWidget(row, 4)  # Account column
+                if widget and hasattr(widget, 'addItems'):
+                    current_value = widget.currentText()
+                    widget.clear()
+                    widget.addItems(accounts)
+                    # Try to restore previous selection
+                    if current_value in accounts:
+                        widget.setCurrentText(current_value)
+                    else:
+                        # If previous selection no longer exists, select first item if available
+                        if accounts and len(accounts) > 0:
+                            widget.setCurrentIndex(0)
+                    updated_count += 1
+            
+            print(f"✅ Refreshed {updated_count} account dropdowns in monthly data tab")
+            
+            # Also update the status to show user the refresh happened
+            if hasattr(self, 'status_label'):
+                self.status_label.setText("✅ Account options updated")
+            
+        except Exception as e:
+            print(f"❌ Error refreshing account dropdowns: {e}")
+
+    def refresh_category_dropdowns(self):
+        """Refresh category dropdown options in all visible dropdowns."""
+        try:
+            print("🔄 Refreshing category dropdowns in monthly data tab...")
+            # Get updated category list
+            categories = self.get_categories()
+
+            # Update all category dropdown widgets (column 3)
+            updated_count = 0
+            for row in range(self.data_table.rowCount()):
+                widget = self.data_table.cellWidget(row, 3)  # Category column
+                if widget and hasattr(widget, 'addItems'):
+                    current_value = widget.currentText()
+                    widget.clear()
+                    widget.addItems(categories)
+                    # Try to restore previous selection
+                    if current_value in categories:
+                        widget.setCurrentText(current_value)
+                    else:
+                        if categories:
+                            widget.setCurrentIndex(0)
+                    updated_count += 1
+
+            print(f"✅ Refreshed {updated_count} category dropdowns in monthly data tab")
+
+            if hasattr(self, 'status_label'):
+                self.status_label.setText("✅ Category options updated")
+
+        except Exception as e:
+            print(f"❌ Error refreshing category dropdowns: {e}")
+    
     def validate_date(self, date_str: str) -> bool:
         """Validate date string."""
         if not date_str.strip():
@@ -418,7 +499,7 @@ class MonthlyDataTab(BaseEditableTable):
         try:
             # Get current server data
             df = self.sheets_service.get_data_as_dataframe(
-                self.spreadsheet_id, f"'{self.current_sheet_name}'!A:Z", use_cache=False
+                self.spreadsheet_id, f"'{self.current_sheet_name}'!A:Z"
             )
             current_server_rows = len(df)
             
@@ -468,27 +549,49 @@ class MonthlyDataTab(BaseEditableTable):
             List of active category names from Categories sheet.
         """
         try:
-            # Get categories data from the Categories sheet
-            range_name = "'Categories'!A:E"
+            # Get categories data from the Categories sheet (matches CategoriesTab structure)
+            range_name = "'Categories'!A:B"
             df = self.sheets_service.get_data_as_dataframe(
-                self.spreadsheet_id, range_name, use_cache=False
+                self.spreadsheet_id, range_name
             )
             
             if df.empty:
                 return ["Food", "Transportation", "Shopping", "Bills", "Entertainment"]
             
-            # Extract active categories (column 0 = name, column 4 = active status)
+            # Extract category names from first column (Category Name)
             active_categories = []
             for _, row in df.iterrows():
                 category_name = str(row.iloc[0]).strip() if pd.notna(row.iloc[0]) else ""
-                is_active = str(row.iloc[4]).strip().upper() in ["YES", "Y", "TRUE", "1"] if len(row) > 4 and pd.notna(row.iloc[4]) else True
                 
-                if category_name and is_active:
+                if category_name:
                     active_categories.append(category_name)
             
+            print(f"📋 Loaded {len(active_categories)} categories: {active_categories}")
             return active_categories if active_categories else ["Food", "Transportation", "Shopping", "Bills", "Entertainment"]
             
         except Exception as e:
             print(f"Error loading categories: {e}")
             return ["Food", "Transportation", "Shopping", "Bills", "Entertainment"]
+    
+    def get_accounts(self) -> List[str]:
+        """Get list of active account names for dropdowns.
+        
+        Returns:
+            List of active account names from cached sheets service.
+        """
+        try:
+            # Get accounts from direct API call
+            accounts = self.sheets_service.get_accounts(self.spreadsheet_id)
+            return accounts if accounts else ["Cash Wallet", "Primary Chequing"]
+        except Exception as e:
+            print(f"Error loading accounts: {e}")
+            return ["Cash Wallet", "Primary Chequing"]
+    
+    def add_new_row(self):
+        """Override to ensure new rows get fresh account dropdown options."""
+        # Call parent to add the row (which will call get_accounts for fresh options)
+        super().add_new_row()
+        
+        # Additional refresh to make sure all dropdowns are updated
+        self.refresh_account_dropdowns()
     
