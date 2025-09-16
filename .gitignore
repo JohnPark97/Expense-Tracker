@@ -75,9 +75,11 @@ logs/
 temp/
 *.log
 
+# Cache files
+expense_sheets_cache.json
+expense_sheets_cache.json.backup
+
 # Packaging
 *.dmg
 *.exe
 *.msi
-
-*.json*
