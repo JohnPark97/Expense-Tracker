@@ -357,6 +357,8 @@ class CachedGoogleSheetsService:
                 for cache_key in cached_names:
                     if cache_key == "accounts":
                         display_names.append("Accounts")
+                    elif cache_key == "account-holders":
+                        display_names.append("Account Holders")
                     else:
                         # Convert 'january-2025' back to 'January 2025'
                         parts = cache_key.split('-')

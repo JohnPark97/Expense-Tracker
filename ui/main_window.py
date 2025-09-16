@@ -17,7 +17,6 @@ from ui.tabs.overview_tab import OverviewTab
 from ui.tabs.monthly_data_tab import MonthlyDataTab
 from ui.tabs.categories_tab import CategoriesTab
 from ui.tabs.accounts_tab import AccountsTab
-from ui.tabs.account_holders_tab import AccountHoldersTab
 from ui.threads.auth_thread import AuthThread
 
 
@@ -174,12 +173,10 @@ Instructions:
         self.monthly_tab = MonthlyDataTab(self.sheets_service, self.spreadsheet_id)
         self.categories_tab = CategoriesTab(self.sheets_service, self.spreadsheet_id)
         self.accounts_tab = AccountsTab(self.sheets_service, self.spreadsheet_id)
-        self.account_holders_tab = AccountHoldersTab(self.sheets_service, self.spreadsheet_id)
         
         self.tabs_widget.addTab(self.overview_tab, "📊 Overview")
         self.tabs_widget.addTab(self.monthly_tab, "📅 Monthly Data")
         self.tabs_widget.addTab(self.accounts_tab, "🏦 Accounts")
-        self.tabs_widget.addTab(self.account_holders_tab, "👤 Account Holders")
         self.tabs_widget.addTab(self.categories_tab, "🏷️ Categories")
         
         # Set default tab

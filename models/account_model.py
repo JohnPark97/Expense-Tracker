@@ -50,7 +50,6 @@ class Account:
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
     notes: Optional[str] = None
-    account_holder_id: Optional[str] = None  # ID of the account holder
     
     def __post_init__(self):
         """Post-initialization validation."""
@@ -77,7 +76,6 @@ class Account:
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'notes': self.notes,
-            'account_holder_id': self.account_holder_id
         }
     
     @classmethod
@@ -104,7 +102,6 @@ class Account:
             created_at=created_at or datetime.now(),
             updated_at=updated_at or datetime.now(),
             notes=data.get('notes'),
-            account_holder_id=data.get('account_holder_id')
         )
 
     @property
@@ -308,7 +305,7 @@ class AccountGroup:
 
 
 # Helper functions for account management
-def create_default_accounts(account_holder_id: Optional[str] = None) -> List[Account]:
+def create_default_accounts() -> List[Account]:
     """Create default accounts for a new user."""
     return [
         Account(
@@ -317,7 +314,6 @@ def create_default_accounts(account_holder_id: Optional[str] = None) -> List[Acc
             account_type=AccountType.CASH,
             current_balance=0.0,
             notes="Physical cash on hand",
-            account_holder_id=account_holder_id
         ),
         Account(
             id="primary_chequing",
@@ -325,7 +321,6 @@ def create_default_accounts(account_holder_id: Optional[str] = None) -> List[Acc
             account_type=AccountType.CHEQUING,
             current_balance=0.0,
             notes="Main chequing account for daily expenses",
-            account_holder_id=account_holder_id
         ),
         Account(
             id="primary_savings",
@@ -333,7 +328,6 @@ def create_default_accounts(account_holder_id: Optional[str] = None) -> List[Acc
             account_type=AccountType.SAVINGS,
             current_balance=0.0,
             notes="Main savings account for emergency funds",
-            account_holder_id=account_holder_id
         )
     ]
 

@@ -12,8 +12,6 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 
 from services.cached_sheets_service import CachedGoogleSheetsService
-from services.account_holder_service import AccountHolderService
-from repositories.account_holder_repository import AccountHolderRepository
 from ui.components import BaseEditableTable, ColumnConfig
 
 
@@ -31,9 +29,6 @@ class MonthlyDataTab(BaseEditableTable):
         self.cached_sheets_service = sheets_service
         self.cached_spreadsheet_id = spreadsheet_id
         
-        # Initialize account holder services
-        self.account_holder_repo = AccountHolderRepository(sheets_service, spreadsheet_id)
-        self.account_holder_service = AccountHolderService(self.account_holder_repo)
         self.current_sheet_name = ""
         
         # Define expense column configuration
@@ -88,14 +83,6 @@ class MonthlyDataTab(BaseEditableTable):
                 resize_mode="content",
                 width=150
             ),
-            ColumnConfig(
-                header="Account Holder",
-                component_type="dropdown",
-                options_source="get_account_holders",
-                tooltip="Person who made this expense/income",
-                default_value="",
-                resize_mode="stretch"
-            )
         ]
         
         # We'll initialize the base class after setting up month/year controls
@@ -518,14 +505,3 @@ class MonthlyDataTab(BaseEditableTable):
             print(f"Error loading categories: {e}")
             return ["Food", "Transportation", "Shopping", "Bills", "Entertainment"]
     
-    def get_account_holders(self) -> List[str]:
-        """Get account holder names for dropdown."""
-        try:
-            # Initialize default account holder if none exist
-            self.account_holder_service.initialize_default_account_holder()
-            
-            # Get all account holder names
-            return self.account_holder_service.get_account_holder_names()
-        except Exception as e:
-            print(f"Error getting account holders: {e}")
-            return ["Default User"]
